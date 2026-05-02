@@ -1,0 +1,33 @@
+# Dependencies / libraries
+node_modules/
+.lib/
+
+# Build / output
+build/
+dist/
+out/
+target/
+.next/
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Binary files
+*.class
+*.jar
+*.dll
+*.so
+*.exe

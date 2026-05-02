@@ -1,0 +1,260 @@
+"use client";
+
+import { FormEvent, useMemo, useState } from "react";
+import { getPricingDisplayCopy } from "./lib/pricing";
+import type { RepoScanError, RepoScanResult } from "./types";
+
+const currency = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+const number = new Intl.NumberFormat("en-US");
+const pricingCopy = getPricingDisplayCopy();
+
+function getQuote(result: RepoScanResult) {
+  const tierLabel = {
+    small: "Small",
+    medium: "Medium",
+    deep: "Deep",
+  }[result.suggestedTier];
+
+  return `${tierLabel} scan suggested: ${number.format(
+    result.estimatedRelevantFileCount,
+  )} relevant files and about ${number.format(
+    result.totalEstimatedTokens,
+  )} tokens before any AI analysis.`;
+}
+
+function Stat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function Tags({ values, emptyLabel }: { values: string[]; emptyLabel: string }) {
+  if (values.length === 0) {
+    return <p className="muted">{emptyLabel}</p>;
+  }
+
+  return (
+    <div className="tags">
+      {values.map((value) => (
+        <span key={value}>{value}</span>
+      ))}
+    </div>
+  );
+}
+
+export default function Home() {
+  const [repoUrl, setRepoUrl] = useState("");
+  const [result, setResult] = useState<RepoScanResult | null>(null);
+  const [error, setError] = useState<RepoScanError | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const languageBreakdown = useMemo(() => {
+    if (!result) {
+      return [];
+    }
+
+    return Object.entries(result.languages)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5);
+  }, [result]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setResult(null);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/scan-repo", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ repoUrl }),
+      });
+
+      const payload = (await response.json()) as RepoScanResult | RepoScanError;
+
+      if (!response.ok) {
+        setError(payload as RepoScanError);
+        return;
+      }
+
+      setResult(payload as RepoScanResult);
+    } catch {
+      setError({
+        code: "UNKNOWN_ERROR",
+        error: "Unable to reach the scan service. Check your connection and try again.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  return (
+    <main className="page-shell">
+      <section className="intro">
+        <div>
+          <p className="eyebrow">RepoCram</p>
+          <h1>Quote a GitHub repo before the deep analysis begins.</h1>
+          <p className="lede">
+            Paste a public repository URL to fetch metadata, file structure, language signals,
+            and a suggested analysis tier. Paid AI analysis is intentionally not implemented yet.
+          </p>
+        </div>
+      </section>
+
+      <section className="scanner">
+        <form onSubmit={handleSubmit} className="scan-form">
+          <label htmlFor="repoUrl">GitHub repository URL</label>
+          <div className="input-row">
+            <input
+              id="repoUrl"
+              type="url"
+              placeholder="https://github.com/vercel/next.js"
+              value={repoUrl}
+              onChange={(event) => setRepoUrl(event.target.value)}
+              required
+            />
+            <button type="submit" disabled={isLoading}>
+              {isLoading ? "Scanning..." : "Scan repo"}
+            </button>
+          </div>
+        </form>
+
+        {error ? (
+          <div className="notice error" role="alert">
+            <strong>{error.code.replaceAll("_", " ")}</strong>
+            <span>{error.error}</span>
+          </div>
+        ) : null}
+
+        {result ? (
+          <div className="results">
+            <div className="repo-summary">
+              <div>
+                <p className="eyebrow">Public repository</p>
+                <h2>
+                  {result.owner}/{result.repoName}
+                </h2>
+                <p>{result.description ?? "No description provided."}</p>
+              </div>
+              <div className={`tier-badge ${result.suggestedTier}`}>
+                <span>{result.suggestedTier} one-time</span>
+                <strong>{currency.format(result.suggestedPrice)}</strong>
+              </div>
+            </div>
+
+            <blockquote>{getQuote(result)}</blockquote>
+
+            {result.upgradeMessage ? (
+              <div className="notice upgrade" role="status">
+                <strong>Upgrade available</strong>
+                <span>{result.upgradeMessage}</span>
+              </div>
+            ) : null}
+
+            <div className="stats-grid">
+              <Stat label="Stars" value={number.format(result.stars)} />
+              <Stat label="Default branch" value={result.defaultBranch} />
+              <Stat label="Total files" value={number.format(result.totalFileCount)} />
+              <Stat
+                label="Relevant files"
+                value={number.format(result.estimatedRelevantFileCount)}
+              />
+              <Stat
+                label="Estimated tokens"
+                value={number.format(result.totalEstimatedTokens)}
+              />
+              <Stat
+                label="One-time price"
+                value={currency.format(result.suggestedPrice)}
+              />
+            </div>
+
+            <div className="detail-grid">
+              <section>
+                <h3>Detected languages</h3>
+                <Tags
+                  values={result.detectedLanguages}
+                  emptyLabel="No language signals detected."
+                />
+              </section>
+              <section>
+                <h3>Detected frameworks</h3>
+                <Tags
+                  values={result.detectedFrameworks}
+                  emptyLabel="No framework signals detected."
+                />
+              </section>
+            </div>
+
+            <section className="language-panel">
+              <h3>GitHub language breakdown</h3>
+              {languageBreakdown.length > 0 ? (
+                <div className="language-list">
+                  {languageBreakdown.map(([language, bytes]) => (
+                    <div key={language}>
+                      <span>{language}</span>
+                      <strong>{number.format(bytes)} bytes</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">GitHub did not return a language breakdown.</p>
+              )}
+            </section>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <h2>Ready for the first cram.</h2>
+            <p>
+              The scan runs against GitHub metadata and repository trees only. It does
+              not read private code or call an AI model.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section className="pricing-section">
+        <div className="section-heading">
+          <p className="eyebrow">Subscription pricing</p>
+          <h2>Monthly plans stay separate from one-time scans.</h2>
+        </div>
+
+        <div className="plans-grid">
+          {pricingCopy.subscriptions.map((plan) => (
+            <article className="plan-card" key={plan.id}>
+              <div>
+                <h3>{plan.name}</h3>
+                <p>{plan.summary}</p>
+              </div>
+              <strong className="plan-price">
+                {plan.priceLabel}
+              </strong>
+              <ul>
+                {plan.features.map((feature) => (
+                  <li key={feature}>{feature}</li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </section>
+    </main>
+  );
+}
