@@ -6,6 +6,10 @@ import {
   getUpgradeMessage,
   incrementScanUsage,
 } from "../../lib/pricing";
+import {
+  analyzeRepositoryQuality,
+  detectRepositoryFrameworks,
+} from "../../lib/repo-analysis";
 import { shouldScanRepositoryPath } from "../../lib/repo-filter";
 import type {
   RepoScanError,
@@ -115,7 +119,7 @@ async function githubFetch<T>(path: string): Promise<T> {
     headers: {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "RepoCram",
+      "User-Agent": "RepoPilot",
     },
     next: { revalidate: 60 },
   });
@@ -182,66 +186,6 @@ function detectLanguages(files: GitHubTreeItem[], languages: Record<string, numb
   return Array.from(detected).sort();
 }
 
-function detectFrameworks(files: GitHubTreeItem[]) {
-  const pathList = files.map((file) => file.path.toLowerCase());
-  const paths = new Set(pathList);
-  const frameworks = new Set<string>();
-
-  if (
-    paths.has("next.config.js") ||
-    paths.has("next.config.mjs") ||
-    paths.has("next.config.ts") ||
-    pathList.some((path) => path.startsWith("app/") || path.startsWith("pages/"))
-  ) {
-    frameworks.add("Next.js");
-  }
-
-  if (paths.has("vite.config.js") || paths.has("vite.config.ts")) {
-    frameworks.add("Vite");
-  }
-
-  if (pathList.some((path) => path.endsWith(".svelte") || path.includes("svelte.config."))) {
-    frameworks.add("Svelte");
-  }
-
-  if (pathList.some((path) => path.endsWith(".vue") || path.includes("nuxt.config."))) {
-    frameworks.add(paths.has("nuxt.config.ts") || paths.has("nuxt.config.js") ? "Nuxt" : "Vue");
-  }
-
-  if (pathList.some((path) => path.includes("angular.json"))) {
-    frameworks.add("Angular");
-  }
-
-  if (pathList.some((path) => path.includes("django") || path.includes("manage.py"))) {
-    frameworks.add("Django");
-  }
-
-  if (pathList.some((path) => path.includes("rails") || path === "gemfile")) {
-    frameworks.add("Rails");
-  }
-
-  if (pathList.some((path) => path === "go.mod")) {
-    frameworks.add("Go module");
-  }
-
-  if (pathList.some((path) => path === "cargo.toml")) {
-    frameworks.add("Rust/Cargo");
-  }
-
-  if (
-    pathList.some(
-      (path) =>
-        path.endsWith(".jsx") ||
-        path.endsWith(".tsx") ||
-        path.includes("react"),
-    )
-  ) {
-    frameworks.add("React");
-  }
-
-  return [...frameworks].sort();
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as ScanRepoRequest;
@@ -289,8 +233,16 @@ export async function POST(request: NextRequest) {
     );
     const totalEstimatedTokens = estimateTokens(relevantFiles);
     const detectedLanguages = detectLanguages(relevantFiles, languages);
-    const detectedFrameworks = detectFrameworks(relevantFiles);
+    const detectedFrameworks = detectRepositoryFrameworks(relevantFiles);
     const tier = getOneTimeTier(relevantFiles.length, totalEstimatedTokens);
+    const qualityAnalysis = analyzeRepositoryQuality({
+      files: relevantFiles,
+      detectedLanguages,
+      detectedFrameworks,
+      totalEstimatedTokens,
+      suggestedTier: tier.suggestedTier,
+      plan: subscriptionPlan,
+    });
     let updatedUsage: SubscriptionUsage | undefined;
     let upgradeMessage: string | null | undefined;
 
@@ -326,6 +278,7 @@ export async function POST(request: NextRequest) {
       detectedLanguages,
       detectedFrameworks,
       ...tier,
+      ...qualityAnalysis,
       usage: updatedUsage,
       upgradeMessage,
     };

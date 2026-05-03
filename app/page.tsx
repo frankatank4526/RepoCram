@@ -109,7 +109,7 @@ export default function Home() {
     <main className="page-shell">
       <section className="intro">
         <div>
-          <p className="eyebrow">RepoCram</p>
+          <p className="eyebrow">RepoPilot</p>
           <h1>Quote a GitHub repo before the deep analysis begins.</h1>
           <p className="lede">
             Paste a public repository URL to fetch metadata, file structure, language signals,
@@ -203,6 +203,113 @@ export default function Home() {
               </section>
             </div>
 
+            <section className="analysis-panel">
+              <div className="panel-heading">
+                <h3>Repo summary</h3>
+                <span>
+                  {number.format(result.analysisBudget.sampledFileCount)} file sample
+                </span>
+              </div>
+              <ul className="insight-list">
+                {result.summary.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </section>
+
+            <div className="analysis-grid">
+              <section>
+                <h3>Structure signals</h3>
+                <div className="signal-grid">
+                  <Stat
+                    label="Source files"
+                    value={number.format(result.structure.sourceFileCount)}
+                  />
+                  <Stat
+                    label="Test files"
+                    value={number.format(result.structure.testFileCount)}
+                  />
+                  <Stat
+                    label="Config files"
+                    value={number.format(result.structure.configFileCount)}
+                  />
+                  <Stat
+                    label="Docs files"
+                    value={number.format(result.structure.documentationFileCount)}
+                  />
+                </div>
+                <div className="directory-list">
+                  {result.structure.topDirectories.map((directory) => (
+                    <div key={directory.name}>
+                      <span>{directory.name}</span>
+                      <strong>{number.format(directory.fileCount)} files</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <h3>Important files</h3>
+                {result.structure.importantFiles.length > 0 ? (
+                  <div className="important-files-scroll">
+                    <ul className="compact-list">
+                      {result.structure.importantFiles.map((path) => (
+                        <li key={path}>{path}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="muted">No common project anchor files were found.</p>
+                )}
+              </section>
+            </div>
+
+            <section className="analysis-panel">
+              <div className="panel-heading">
+                <h3>Suggested improvements</h3>
+                <span>{result.analysisBudget.strategy}</span>
+              </div>
+              <div className="improvement-list">
+                {result.improvements.map((improvement) => (
+                  <article key={improvement.title}>
+                    <span className={`priority ${improvement.priority}`}>
+                      {improvement.priority}
+                    </span>
+                    <div>
+                      <h4>{improvement.title}</h4>
+                      <p>{improvement.rationale}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="analysis-panel">
+              <div className="panel-heading">
+                <h3>Mock PR ideas</h3>
+                <span>
+                  {result.mockPullRequests.length > 0
+                    ? "Generated from tree signals"
+                    : "Unavailable on this plan"}
+                </span>
+              </div>
+              {result.mockPullRequests.length > 0 ? (
+                <div className="mock-pr-list">
+                  {result.mockPullRequests.map((idea) => (
+                    <article key={idea.title}>
+                      <h4>{idea.title}</h4>
+                      <p>{idea.summary}</p>
+                      <Tags values={idea.suggestedFiles} emptyLabel="" />
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">
+                  Mock PR ideas are included on paid plans and one-time analysis.
+                </p>
+              )}
+            </section>
+
             <section className="language-panel">
               <h3>GitHub language breakdown</h3>
               {languageBreakdown.length > 0 ? (
@@ -221,7 +328,7 @@ export default function Home() {
           </div>
         ) : (
           <div className="empty-state">
-            <h2>Ready for the first cram.</h2>
+            <h2>Ready for the first scan.</h2>
             <p>
               The scan runs against GitHub metadata and repository trees only. It does
               not read private code or call an AI model.

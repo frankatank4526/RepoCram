@@ -1,18 +1,28 @@
 import type {
-  OneTimeScanTier,
-  PlanLimits,
-  SubscriptionPlan,
-  SubscriptionPlanId,
-  SubscriptionUsage,
+  AnalysisBudget,
+  MockPullRequestIdea,
+  RepoImprovement,
+  RepoStructureAnalysis,
+} from "./lib/repo-analysis";
+import type {
+  OneTimeScanTier as PricingOneTimeScanTier,
+  PlanLimits as PricingPlanLimits,
+  SubscriptionPlan as PricingSubscriptionPlan,
+  SubscriptionPlanId as PricingSubscriptionPlanId,
+  SubscriptionUsage as PricingSubscriptionUsage,
 } from "./lib/pricing";
 
-export type SuggestedTier = OneTimeScanTier;
+export type SuggestedTier = PricingOneTimeScanTier;
+export type OneTimeScanTier = PricingOneTimeScanTier;
+export type PlanLimits = PricingPlanLimits;
+export type SubscriptionPlan = PricingSubscriptionPlan;
+export type SubscriptionPlanId = PricingSubscriptionPlanId;
+export type SubscriptionUsage = PricingSubscriptionUsage;
 export type {
-  OneTimeScanTier,
-  PlanLimits,
-  SubscriptionPlan,
-  SubscriptionPlanId,
-  SubscriptionUsage,
+  AnalysisBudget,
+  MockPullRequestIdea,
+  RepoImprovement,
+  RepoStructureAnalysis,
 };
 
 export type RepoScanResult = {
@@ -29,6 +39,11 @@ export type RepoScanResult = {
   detectedFrameworks: string[];
   suggestedTier: SuggestedTier;
   suggestedPrice: number;
+  summary: string[];
+  structure: RepoStructureAnalysis;
+  improvements: RepoImprovement[];
+  mockPullRequests: MockPullRequestIdea[];
+  analysisBudget: AnalysisBudget;
   usage?: SubscriptionUsage;
   upgradeMessage?: string | null;
 };

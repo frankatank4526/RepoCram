@@ -1,17 +1,18 @@
 # RepoPilot
 
-RepoPilot is a Next.js TypeScript app for scanning public GitHub repositories before any paid AI analysis runs. A user can submit a GitHub repository URL, get basic repo metadata, filter out generated or dependency-heavy files, estimate scan size, and receive a one-time scan quote.
+RepoPilot is a Next.js TypeScript app for scanning public GitHub repositories before any paid AI analysis runs. A user can submit a GitHub repository URL, get repo metadata, filter out generated or dependency-heavy files, estimate scan size, receive a one-time scan quote, and review deterministic Phase 2 repo-quality insights.
 
-This repository currently contains Phase 1 functionality only. It does not integrate payments, Stripe, authenticated GitHub access, real AI analysis, embeddings, summarization jobs, or mock PR generation yet.
+This repository currently contains Phase 1 functionality plus the first Phase 2 repo-analysis layer. It does not integrate payments, Stripe, authenticated GitHub access, real AI analysis, embeddings, summarization jobs, or actual PR creation yet.
 
 ## Status
-This project is currently in Phase 1 (core infrastructure):
+This project is currently entering Phase 2:
 - Pricing + subscription system
 - Scan filtering
 - Permission logic
+- Deterministic repo summaries, structure analysis, improvements, and mock PR ideas
 - Test coverage
 
-Next: Phase 2 will focus on improving scan analysis quality and generating actionable suggestions.
+Next: Phase 2 can add AI-backed summaries behind the existing token-aware analysis budget.
 
 ## Current Features
 
@@ -40,6 +41,13 @@ Next: Phase 2 will focus on improving scan analysis quality and generating actio
   - basic suggestions only
 - Scan permission logic with `canRunScan`
 - Upgrade messaging with `getUpgradeMessage`
+- Deterministic repo structure analysis:
+  - top directories
+  - important project files
+  - source/test/config/docs counts
+- Token-aware summary budget for future AI passes
+- Suggested improvements generated from tree-level signals
+- Mock PR ideas for paid plans and one-time analysis
 - Minimal Node test suite for filtering, pricing, subscription rules, and scan-flow regression checks
 
 ## File Filtering
@@ -61,6 +69,39 @@ Excluded directories include:
 Common binary/library files are also excluded, including `.jar`, `.class`, `.dll`, `.so`, `.dylib`, `.exe`, images, and PDFs.
 
 Source and config files such as `.java`, `.ts`, `.js`, `.py`, `.md`, and `.json` remain scannable unless they are inside an excluded folder.
+
+## Compatibility
+
+RepoPilot currently supports deterministic, heuristic-based analysis for common repository shapes.
+
+Supported languages:
+
+- JavaScript / TypeScript
+- Python
+- Java
+- C / C++ (partial support)
+- Go and Rust project signals (partial support)
+- Markdown, JSON, YAML, TOML, CSS, HTML, and related config/documentation files
+
+Supported frameworks and project signals include:
+
+- Next.js
+- React
+- Express / Node.js
+- Flask
+- Django
+- FastAPI
+- Spring Boot
+- Streamlit
+- Vite
+- Maven / Gradle
+- CMake
+- Docker-based projects
+- Monorepos
+
+Detection is based on deterministic heuristics such as file structure, file extensions, config files, and dependency indicators. It is not guaranteed to identify every framework perfectly, and some stacks may only be partially recognized. RepoPilot does not analyze runtime behavior or true code coverage yet.
+
+Future improvements may include broader framework support, improved detection accuracy, and deeper runtime-aware analysis.
 
 ## Pricing And Subscription Logic
 
@@ -92,6 +133,9 @@ Free users can only run small scans. Starter users can run small and medium scan
 - `app/lib/pricing.ts`  
   Central pricing, subscription plan, permission, usage, and upgrade-message logic.
 
+- `app/lib/repo-analysis.ts`  
+  Phase 2 deterministic repo-quality analysis for summaries, structure signals, improvement suggestions, mock PR ideas, and token-aware AI budgeting.
+
 - `app/types.ts`  
   Shared TypeScript types for scan results, errors, tiers, plans, and usage.
 
@@ -107,6 +151,9 @@ Free users can only run small scans. Starter users can run small and medium scan
 - `tests/scan-flow.test.ts`  
   Regression test for the high-level scan flow around filtering and one-time quote generation.
 
+- `tests/repo-analysis.test.ts`  
+  Unit tests for Phase 2 structure analysis, token-aware summaries, and mock PR gating.
+
 ## High-Level Scan Flow
 
 1. A user submits a public GitHub repository URL.
@@ -114,10 +161,11 @@ Free users can only run small scans. Starter users can run small and medium scan
 3. Repo paths are filtered with `shouldScanRepositoryPath`.
 4. Relevant files are counted and used for token estimation.
 5. A one-time scan tier is calculated with `getOneTimeTier`.
-6. If a subscription plan and mocked usage are provided, `canRunScan` checks whether the scan is allowed.
-7. If blocked, the API returns an error message.
-8. If allowed, the scan result is returned.
-9. For subscription scans, mocked usage is incremented and `getUpgradeMessage` may return a Free-tier upgrade prompt.
+6. Phase 2 analysis generates repo summaries, structure signals, suggested improvements, mock PR ideas, and a token-aware future AI budget.
+7. If a subscription plan and mocked usage are provided, `canRunScan` checks whether the scan is allowed.
+8. If blocked, the API returns an error message.
+9. If allowed, the scan result is returned.
+10. For subscription scans, mocked usage is incremented and `getUpgradeMessage` may return a Free-tier upgrade prompt.
 
 ## Test Suite
 
@@ -148,6 +196,9 @@ Current test coverage includes:
 - Starter plan deep-scan blocking
 - Pro and Team deep-scan allowance
 - `canRunScan` edge cases for exact monthly limit and one-before-limit usage
+- Phase 2 repo structure analysis
+- Free-plan mock PR idea blocking
+- Paid-plan mock PR idea generation
 - a small scan-flow regression check
 
 ## Development
@@ -175,6 +226,6 @@ npm run build
 - No payment or Stripe integration
 - No paid AI analysis
 - No embeddings or summarization pipeline
-- No mock PR generation
+- No actual PR creation
 - No persistent user accounts or database-backed usage tracking
 - GitHub access is public-only and unauthenticated
