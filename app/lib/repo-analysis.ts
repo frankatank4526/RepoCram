@@ -56,7 +56,14 @@ export type RepoQualityAnalysis = {
 
 export type FileContentMap = Record<string, string>;
 
-type ImportantFileCategory = "api" | "logic" | "route" | "config" | "other";
+type ImportantFileCategory =
+  | "backend_api"
+  | "frontend_route"
+  | "frontend_component"
+  | "shared_logic"
+  | "framework_entry"
+  | "config"
+  | "other";
 
 type FrameworkDetectionContext = {
   paths: string[];
@@ -177,6 +184,28 @@ const STATIC_ASSET_EXTENSIONS = new Set([
   ".exe",
 ]);
 
+const DATA_ARTIFACT_EXTENSIONS = new Set([
+  ".csv",
+  ".jsonl",
+  ".parquet",
+  ".sqlite",
+  ".db",
+  ".log",
+]);
+
+const TEMP_OUTPUT_SEGMENTS = new Set([
+  ".cache",
+  "cache",
+  "coverage",
+  "export",
+  "exports",
+  "generated",
+  "output",
+  "outputs",
+  "temp",
+  "tmp",
+]);
+
 const IMPORTANT_KEYWORDS = [
   "app",
   "client",
@@ -257,6 +286,37 @@ const MVC_PATH_SEGMENTS = new Set([
   "config",
 ]);
 
+const DOMAIN_SEGMENTS = new Set([
+  "account",
+  "admin",
+  "analyst",
+  "auth",
+  "buyer",
+  "cart",
+  "catalog",
+  "customer",
+  "dashboard",
+  "driver",
+  "inventory",
+  "menu",
+  "order",
+  "orders",
+  "payment",
+  "payments",
+  "product",
+  "products",
+  "profile",
+  "recipe",
+  "recipes",
+  "report",
+  "reports",
+  "seller",
+  "store",
+  "stores",
+  "user",
+  "users",
+]);
+
 function normalizePath(path: string) {
   return path.replaceAll("\\", "/").split("/").filter(Boolean).join("/");
 }
@@ -329,6 +389,20 @@ function isCommonSourceArea(path: string) {
 
 function isExecutableSourceFile(path: string) {
   return ENTRY_EXTENSIONS.has(getExtension(path));
+}
+
+function isDataArtifactFile(path: string) {
+  return DATA_ARTIFACT_EXTENSIONS.has(getExtension(path));
+}
+
+function isTemporaryOrGeneratedOutput(path: string) {
+  const parts = getPathParts(path);
+  const fileName = getFileName(path);
+
+  return (
+    parts.some((part) => TEMP_OUTPUT_SEGMENTS.has(part)) ||
+    /(?:^|[-_.])(export|generated|output|temp|tmp|cache)(?:[-_.]|$)/.test(fileName)
+  );
 }
 
 function isKnownRuntimeEntry(path: string) {
@@ -417,6 +491,46 @@ function isLogicFile(path: string) {
     (hasDescriptiveFileName(normalized) ||
       hasImportantKeyword(normalized) ||
       isCommonSourceArea(normalized))
+  );
+}
+
+function isFrontendComponentFile(path: string) {
+  const extension = getExtension(path);
+  const parts = getPathParts(path);
+
+  return (
+    [".jsx", ".tsx"].includes(extension) &&
+    !isRouteFile(path) &&
+    (parts.includes("components") ||
+      parts.includes("component") ||
+      parts.includes("app") ||
+      parts.includes("pages"))
+  );
+}
+
+function isFrontendPath(path: string) {
+  const parts = getPathParts(path);
+
+  return (
+    isRouteFile(path) ||
+    isFrontendComponentFile(path) ||
+    parts.includes("frontend") ||
+    parts.includes("client") ||
+    parts.includes("pages") ||
+    parts.includes("components")
+  );
+}
+
+function isBackendApiPath(path: string) {
+  const parts = getPathParts(path);
+
+  return (
+    isApiFile(path) ||
+    parts.includes("backend") ||
+    parts.includes("server") ||
+    parts.includes("routes") ||
+    parts.includes("controllers") ||
+    parts.includes("controller")
   );
 }
 
@@ -514,6 +628,10 @@ function getFileImportanceScore(path: string, stackSignals?: StackSignals) {
   let score = 0;
 
   if (STATIC_ASSET_EXTENSIONS.has(extension)) {
+    return 0;
+  }
+
+  if (isDataArtifactFile(normalized) || isTemporaryOrGeneratedOutput(normalized)) {
     return 0;
   }
 
@@ -1241,16 +1359,24 @@ function getImportantFileLimit(fileCount: number) {
 }
 
 function getImportantFileCategory(path: string): ImportantFileCategory {
-  if (isApiFile(path) && !isRouteFile(path)) {
-    return "api";
+  if (isKnownRuntimeEntry(path) || /Application\.java$/i.test(path.split("/").pop() ?? "")) {
+    return "framework_entry";
   }
 
-  if (isLogicFile(path)) {
-    return "logic";
+  if (isBackendApiPath(path) && !isRouteFile(path)) {
+    return "backend_api";
   }
 
   if (isRouteFile(path)) {
-    return "route";
+    return "frontend_route";
+  }
+
+  if (isFrontendComponentFile(path)) {
+    return "frontend_component";
+  }
+
+  if (isLogicFile(path)) {
+    return "shared_logic";
   }
 
   if (isConfigFile(path)) {
@@ -1258,6 +1384,39 @@ function getImportantFileCategory(path: string): ImportantFileCategory {
   }
 
   return "other";
+}
+
+function getDomainCandidates(path: string) {
+  const normalized = normalizePath(path).toLowerCase();
+  const parts = getPathParts(normalized);
+  const fileTokens = getDescriptiveFileName(normalized)
+    .split(/[^a-z0-9]+|(?=[A-Z])/i)
+    .map((token) => token.toLowerCase())
+    .filter(Boolean);
+  const candidates = [...parts, ...fileTokens].map((part) =>
+    part.replace(/^\d+_/, "").replace(/_?(routes?|controllers?|services?|pages?)$/, ""),
+  );
+
+  return candidates;
+}
+
+function normalizeDomain(domain: string) {
+  return {
+    orders: "order",
+    payments: "payment",
+    products: "product",
+    recipes: "recipe",
+    reports: "report",
+    stores: "store",
+    users: "user",
+  }[domain] ?? domain;
+}
+
+function getApplicationDomain(path: string) {
+  const candidates = getDomainCandidates(path);
+  const match = candidates.find((candidate) => DOMAIN_SEGMENTS.has(candidate));
+
+  return match ? normalizeDomain(match) : null;
 }
 
 function getFeatureGroup(path: string) {
@@ -1291,20 +1450,25 @@ function selectImportantFiles(paths: string[]) {
       path,
       score: getFileImportanceScore(path, stackSignals),
       category: getImportantFileCategory(path),
+      domain: getApplicationDomain(path),
     }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
   const sorted = scored.map((item) => item.path);
   const selected = new Set<string>();
   const categoryTargets: Record<ImportantFileCategory, number> = {
-    api: Math.max(1, Math.round(limit * 0.25)),
-    logic: Math.max(1, Math.round(limit * 0.35)),
-    route: Math.max(1, Math.round(limit * 0.25)),
+    backend_api: Math.max(1, Math.round(limit * 0.25)),
+    frontend_route: Math.max(1, Math.round(limit * 0.2)),
+    frontend_component: Math.max(1, Math.round(limit * 0.15)),
+    shared_logic: Math.max(1, Math.round(limit * 0.25)),
+    framework_entry: Math.max(1, Math.round(limit * 0.1)),
     config: Math.max(1, Math.round(limit * 0.15)),
     other: Math.max(1, Math.round(limit * 0.1)),
   };
   const getSelectedCategoryCount = (category: string) =>
     [...selected].filter((path) => getImportantFileCategory(path) === category).length;
+  const getSelectedDomainCount = (domain: string) =>
+    [...selected].filter((path) => getApplicationDomain(path) === domain).length;
   const addPath = (path: string) => {
     if (selected.size < limit) {
       selected.add(path);
@@ -1342,21 +1506,75 @@ function selectImportantFiles(paths: string[]) {
       added += 1;
     });
   };
-  const routeFiles = sorted.filter(isRouteFile);
-  const apiFiles = sorted.filter((path) => isApiFile(path) && !isRouteFile(path));
-  const logicFiles = sorted.filter(
-    (path) => isLogicFile(path) && !isApiFile(path),
-  );
-  const configFiles = sorted.filter(isConfigFile);
+  const domainCounts = new Map<string, number>();
+  scored.forEach((item) => {
+    if (item.domain && item.score >= 5 && !["config", "other"].includes(item.category)) {
+      domainCounts.set(item.domain, (domainCounts.get(item.domain) ?? 0) + 1);
+    }
+  });
+  const majorDomains = [...domainCounts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, Math.max(3, Math.floor(limit / 2)))
+    .map(([domain]) => domain);
+  const addDomainRepresentatives = () => {
+    majorDomains.forEach((domain) => {
+      if (selected.size >= limit || getSelectedDomainCount(domain) >= 2) {
+        return;
+      }
 
-  [apiFiles, logicFiles, routeFiles].forEach((bucket) => {
+      const domainCandidates = scored.filter(
+        (item) =>
+          item.domain === domain &&
+          item.score >= 6 &&
+          !selected.has(item.path) &&
+          !["config", "other"].includes(item.category),
+      );
+      const preferredCategories: ImportantFileCategory[] = [
+        "backend_api",
+        "frontend_route",
+        "frontend_component",
+        "shared_logic",
+        "framework_entry",
+      ];
+
+      preferredCategories.forEach((category) => {
+        if (selected.size >= limit || getSelectedDomainCount(domain) >= 2) {
+          return;
+        }
+
+        const candidate = domainCandidates.find((item) => item.category === category);
+        if (candidate) {
+          addPath(candidate.path);
+        }
+      });
+    });
+  };
+  const routeFiles = sorted.filter(isRouteFile);
+  const apiFiles = sorted.filter(
+    (path) => getImportantFileCategory(path) === "backend_api",
+  );
+  const componentFiles = sorted.filter(
+    (path) => getImportantFileCategory(path) === "frontend_component",
+  );
+  const entryFiles = sorted.filter(
+    (path) => getImportantFileCategory(path) === "framework_entry",
+  );
+  const logicFiles = sorted.filter(
+    (path) => getImportantFileCategory(path) === "shared_logic",
+  );
+
+  [entryFiles, apiFiles, logicFiles, routeFiles, componentFiles].forEach((bucket) => {
     if (bucket.length > 0) {
       addPath(bucket[0]);
     }
   });
 
-  addDiverseFromBucket(routeFiles, categoryTargets.route, getFeatureGroup);
-  addDiverseFromBucket(logicFiles, categoryTargets.logic, getFeatureGroup);
+  addDomainRepresentatives();
+  addDiverseFromBucket(routeFiles, categoryTargets.frontend_route, getFeatureGroup);
+  addDiverseFromBucket(logicFiles, categoryTargets.shared_logic, getFeatureGroup);
+  addDiverseFromBucket(apiFiles, categoryTargets.backend_api, getFeatureGroup);
+  addDiverseFromBucket(componentFiles, categoryTargets.frontend_component, getFeatureGroup);
 
   scored.forEach((item) => {
     if (selected.size >= limit || selected.has(item.path)) {

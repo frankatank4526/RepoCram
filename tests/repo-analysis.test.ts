@@ -422,6 +422,107 @@ test("category balance keeps one category from dominating when alternatives scor
   assert.ok(summary.importantFiles.some((path) => /service|repository/i.test(path)));
 });
 
+test("multi-persona repo represents multiple application domains", () => {
+  const files = [
+    "README.md",
+    "api/backend/customer/customer_routes.py",
+    "api/backend/customer/customer_service.py",
+    "api/backend/store/store_routes.py",
+    "api/backend/store/store_service.py",
+    "api/backend/analyst/analyst_routes.py",
+    "api/backend/analyst/report_service.py",
+    "api/backend/admin/admin_routes.py",
+    "api/backend/admin/admin_service.py",
+    "app/src/pages/10_Customer_Home.py",
+    "app/src/pages/11_Store_Data.py",
+    "app/src/pages/12_Analyst_Dashboard.py",
+    "app/src/pages/13_Admin_Settings.py",
+    "app/src/services/customer_client.py",
+    "app/src/services/store_client.py",
+    "app/src/services/analyst_client.py",
+    "app/src/services/admin_client.py",
+    "app/src/.streamlit/config.toml",
+  ];
+  const summary = analyzeRepoStructure(files);
+  const representedDomains = ["customer", "store", "analyst", "admin"].filter((domain) =>
+    summary.importantFiles.some((path) => path.toLowerCase().includes(domain)),
+  );
+
+  assert.ok(representedDomains.length >= 3);
+  assert.ok(
+    summary.importantFiles.some((path) => path.includes("api/backend/customer")),
+  );
+  assert.ok(
+    summary.importantFiles.some((path) => path.includes("app/src/pages/11_Store_Data.py")),
+  );
+});
+
+test("important files include frontend and backend layers for multi-domain apps", () => {
+  const files = [
+    "api/backend/customer/customer_routes.py",
+    "api/backend/customer/customer_service.py",
+    "api/backend/store/store_routes.py",
+    "api/backend/store/store_service.py",
+    "app/src/pages/10_Customer_Home.py",
+    "app/src/pages/11_Store_Data.py",
+    "app/src/services/customer_client.py",
+    "app/src/services/store_client.py",
+    "package.json",
+    "README.md",
+  ];
+  const summary = analyzeRepoStructure(files);
+
+  assert.ok(summary.importantFiles.some((path) => path.startsWith("api/backend/")));
+  assert.ok(summary.importantFiles.some((path) => path.startsWith("app/src/pages/")));
+  assert.ok(summary.importantFiles.some((path) => path.startsWith("app/src/services/")));
+});
+
+test("data artifacts and generated outputs never appear in important files", () => {
+  const files = [
+    "api/backend/customer/customer_routes.py",
+    "api/backend/customer/customer_service.py",
+    "app/src/pages/10_Customer_Home.py",
+    "app/src/data/customers.csv",
+    "app/src/data/orders.jsonl",
+    "app/src/data/export.parquet",
+    "api/backend/cache/customer_cache.sqlite",
+    "api/backend/output/latest_report.json",
+    "logs/app.log",
+  ];
+  const summary = analyzeRepoStructure(files);
+
+  assert.ok(
+    !summary.importantFiles.some((path) =>
+      /\.(csv|jsonl|parquet|sqlite|db|log)$/.test(path),
+    ),
+  );
+  assert.ok(!summary.importantFiles.some((path) => path.includes("/output/")));
+  assert.ok(!summary.importantFiles.some((path) => path.includes("/cache/")));
+});
+
+test("multi-domain config and docs do not dominate important files", () => {
+  const files = [
+    "README.md",
+    "docs/customer.md",
+    "docs/store.md",
+    "config/customer.yaml",
+    "config/store.yaml",
+    "config/admin.yaml",
+    "api/backend/customer/customer_routes.py",
+    "api/backend/store/store_routes.py",
+    "api/backend/admin/admin_routes.py",
+    "app/src/pages/10_Customer_Home.py",
+    "app/src/pages/11_Store_Data.py",
+    "app/src/pages/13_Admin_Settings.py",
+  ];
+  const summary = analyzeRepoStructure(files);
+  const configAndDocs = countMatching(summary.importantFiles, (path) =>
+    /^(docs|config)\//.test(path) || path === "README.md",
+  );
+
+  assert.ok(configAndDocs < summary.importantFiles.length / 2);
+});
+
 test("route-heavy repo does not return mostly page route files", () => {
   const files = [
     "package.json",
