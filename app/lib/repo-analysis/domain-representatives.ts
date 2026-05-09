@@ -80,7 +80,12 @@ export function getInvisibleDomainRepresentativePaths({
   const highlightedPathSet = new Set(highlightedPaths);
   const highlightedDomains = new Set(
     relevantFiles
-      .filter((file) => highlightedPathSet.has(file.path) && file.domain)
+      .filter(
+        (file) =>
+          highlightedPathSet.has(file.path) &&
+          file.domain &&
+          isDomainRepresentativeCandidate(file),
+      )
       .map((file) => file.domain),
   );
   const domainCandidates = new Map<string, RepoFileSummary[]>();

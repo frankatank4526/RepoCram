@@ -89,6 +89,7 @@ const EXTENSION_LANGUAGE_MAP: Record<string, string> = {
   ".rb": "Ruby",
   ".rs": "Rust",
   ".scss": "SCSS",
+  ".sql": "SQL",
   ".svelte": "Svelte",
   ".swift": "Swift",
   ".toml": "TOML",
@@ -130,6 +131,8 @@ const DATA_ARTIFACT_EXTENSIONS = new Set([
   ".db",
   ".log",
 ]);
+
+const SCHEMA_CONTEXT_EXTENSIONS = new Set([".sql"]);
 
 const TEMP_OUTPUT_SEGMENTS = new Set([
   ".cache",
@@ -330,6 +333,10 @@ function isDataArtifactFile(path: string) {
   return DATA_ARTIFACT_EXTENSIONS.has(getExtension(path));
 }
 
+function isSchemaContextFile(path: string) {
+  return SCHEMA_CONTEXT_EXTENSIONS.has(getExtension(path));
+}
+
 function isTemporaryOrGeneratedOutput(path: string) {
   const parts = getPathParts(path);
   const fileName = getFileName(path);
@@ -374,6 +381,15 @@ function isRouteFile(path: string) {
   const fileName = getFileName(path);
 
   return fileName === "page.tsx" || fileName === "page.ts";
+}
+
+function isFrontendPageFile(path: string) {
+  const parts = getPathParts(path);
+
+  return (
+    isRouteFile(path) ||
+    (isExecutableSourceFile(path) && parts.includes("pages") && !isBackendApiPath(path))
+  );
 }
 
 function getAppSegmentIndex(path: string) {
@@ -567,6 +583,10 @@ function getFileImportanceScore(path: string, stackSignals?: StackSignals) {
   }
 
   if (isDataArtifactFile(normalized) || isTemporaryOrGeneratedOutput(normalized)) {
+    return 0;
+  }
+
+  if (isSchemaContextFile(normalized)) {
     return 0;
   }
 
@@ -1298,11 +1318,15 @@ function getImportantFileCategory(path: string): ImportantFileCategory {
     return "framework_entry";
   }
 
+  if (isSchemaContextFile(path) || isConfigFile(path)) {
+    return "config";
+  }
+
   if (isBackendApiPath(path) && !isRouteFile(path)) {
     return "backend_api";
   }
 
-  if (isRouteFile(path)) {
+  if (isFrontendPageFile(path)) {
     return "frontend_route";
   }
 
@@ -1314,10 +1338,6 @@ function getImportantFileCategory(path: string): ImportantFileCategory {
     return "shared_logic";
   }
 
-  if (isConfigFile(path)) {
-    return "config";
-  }
-
   return "other";
 }
 
@@ -1325,7 +1345,7 @@ function getDomainCandidates(path: string) {
   const normalized = normalizePath(path).toLowerCase();
   const parts = getPathParts(normalized);
   const fileTokens = getDescriptiveFileName(normalized)
-    .split(/[^a-z0-9]+|(?=[A-Z])/i)
+    .split(/[^a-z0-9]+/)
     .map((token) => token.toLowerCase())
     .filter(Boolean);
   const candidates = [...parts, ...fileTokens].map((part) =>
@@ -1589,6 +1609,10 @@ function getFileSummaryKind(path: string): RepoFileSummaryKind {
 
   if (isDocumentationFile(path)) {
     return "documentation";
+  }
+
+  if (isSchemaContextFile(path)) {
+    return "config";
   }
 
   if (isConfigFile(path)) {
