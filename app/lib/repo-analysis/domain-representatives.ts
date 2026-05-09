@@ -1,5 +1,7 @@
 import type { ImportantFileCategory, RepoFileSummary } from "./types.ts";
 
+// The representative pass is not a score boost. It only appends valid source
+// candidates for domains that survived relevance but are absent from highlights.
 function isDomainRepresentativeCandidate(file: RepoFileSummary) {
   return (
     Boolean(file.domain) &&
