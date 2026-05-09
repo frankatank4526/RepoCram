@@ -1,5 +1,8 @@
 import type {
   AnalysisBudget,
+  RepoExcludedFile,
+  RepoFileSummary,
+  RepositoryStructureTree,
   MockPullRequestIdea,
   RepoImprovement,
   RepoStructureAnalysis,
@@ -20,6 +23,9 @@ export type SubscriptionPlanId = PricingSubscriptionPlanId;
 export type SubscriptionUsage = PricingSubscriptionUsage;
 export type {
   AnalysisBudget,
+  RepoExcludedFile,
+  RepoFileSummary,
+  RepositoryStructureTree,
   MockPullRequestIdea,
   RepoImprovement,
   RepoStructureAnalysis,

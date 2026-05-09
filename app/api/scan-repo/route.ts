@@ -10,7 +10,7 @@ import {
   analyzeRepositoryQuality,
   detectRepositoryFrameworks,
 } from "../../lib/repo-analysis";
-import { shouldScanRepositoryPath } from "../../lib/repo-filter";
+import { classifyRepositoryPath } from "../../lib/repo-filter";
 import type {
   RepoScanError,
   RepoScanResult,
@@ -228,15 +228,15 @@ export async function POST(request: NextRequest) {
     ]);
 
     const files = tree.tree.filter((item) => item.type === "blob");
-    const relevantFiles = files.filter((file) =>
-      shouldScanRepositoryPath(file.path),
+    const relevantTreeFiles = files.filter((file) =>
+      classifyRepositoryPath(file.path).shouldScan,
     );
-    const totalEstimatedTokens = estimateTokens(relevantFiles);
-    const detectedLanguages = detectLanguages(relevantFiles, languages);
-    const detectedFrameworks = detectRepositoryFrameworks(relevantFiles);
-    const tier = getOneTimeTier(relevantFiles.length, totalEstimatedTokens);
+    const totalEstimatedTokens = estimateTokens(relevantTreeFiles);
+    const detectedLanguages = detectLanguages(relevantTreeFiles, languages);
+    const detectedFrameworks = detectRepositoryFrameworks(relevantTreeFiles);
+    const tier = getOneTimeTier(relevantTreeFiles.length, totalEstimatedTokens);
     const qualityAnalysis = analyzeRepositoryQuality({
-      files: relevantFiles,
+      files,
       detectedLanguages,
       detectedFrameworks,
       totalEstimatedTokens,
@@ -273,7 +273,7 @@ export async function POST(request: NextRequest) {
       defaultBranch: repo.default_branch,
       languages,
       totalFileCount: files.length,
-      estimatedRelevantFileCount: relevantFiles.length,
+      estimatedRelevantFileCount: relevantTreeFiles.length,
       totalEstimatedTokens,
       detectedLanguages,
       detectedFrameworks,

@@ -61,6 +61,7 @@ export default function Home() {
   const [result, setResult] = useState<RepoScanResult | null>(null);
   const [error, setError] = useState<RepoScanError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [treeMode, setTreeMode] = useState<"highlighted" | "relevant">("highlighted");
 
   const languageBreakdown = useMemo(() => {
     if (!result) {
@@ -74,9 +75,10 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    setResult(null);
-    setIsLoading(true);
+      setError(null);
+      setResult(null);
+      setTreeMode("highlighted");
+      setIsLoading(true);
 
     try {
       const response = await fetch("/api/scan-repo", {
@@ -237,6 +239,10 @@ export default function Home() {
                     label="Docs files"
                     value={number.format(result.structure.documentationFileCount)}
                   />
+                  <Stat
+                    label="Excluded files"
+                    value={number.format(result.structure.excludedFiles.length)}
+                  />
                 </div>
                 <div className="directory-list">
                   {result.structure.topDirectories.map((directory) => (
@@ -248,21 +254,102 @@ export default function Home() {
                 </div>
               </section>
 
-              <section>
-                <h3>Important files</h3>
-                {result.structure.importantFiles.length > 0 ? (
-                  <div className="important-files-scroll">
-                    <ul className="compact-list">
-                      {result.structure.importantFiles.map((path) => (
-                        <li key={path}>{path}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="muted">No common project anchor files were found.</p>
-                )}
-              </section>
             </div>
+
+            <section className="analysis-panel">
+              <h3>Highlighted files</h3>
+              {result.structure.highlightedFiles.length > 0 ? (
+                <div className="important-files-scroll">
+                  <ul className="file-summary-list">
+                    {result.structure.highlightedFiles.map((file) => (
+                      <li key={file.path}>
+                        <strong>
+                          {file.path}
+                          <span className="score-pill">score {file.importanceScore}</span>
+                          {file.highlightReason === "domain_representative" ? (
+                            <span className="representative-pill">representative</span>
+                          ) : null}
+                        </strong>
+                        <span>{file.summary}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="muted">No common project anchor files were found.</p>
+              )}
+            </section>
+
+            <section className="analysis-panel">
+              <div className="panel-heading">
+                <h3>Repository structure</h3>
+                <div className="segmented-control" aria-label="Repository structure view">
+                  <button
+                    type="button"
+                    className={treeMode === "highlighted" ? "active" : ""}
+                    onClick={() => setTreeMode("highlighted")}
+                  >
+                    Highlighted
+                  </button>
+                  <button
+                    type="button"
+                    className={treeMode === "relevant" ? "active" : ""}
+                    onClick={() => setTreeMode("relevant")}
+                  >
+                    Relevant
+                  </button>
+                </div>
+              </div>
+              <pre className="repo-tree">
+                {treeMode === "highlighted"
+                  ? result.structure.repositoryTree.highlightedOnly
+                  : result.structure.repositoryTree.allRelevant}
+              </pre>
+            </section>
+
+            <section className="analysis-panel">
+              <div className="panel-heading">
+                <h3>Relevant file context</h3>
+                <span>
+                  {number.format(result.structure.relevantFiles.length)} deterministic file summaries
+                </span>
+              </div>
+              {result.structure.relevantFiles.length > 0 ? (
+                <div className="important-files-scroll">
+                  <ul className="file-summary-list">
+                    {result.structure.relevantFiles.slice(0, 24).map((file) => (
+                      <li key={file.path}>
+                        <strong>{file.path}</strong>
+                        <span>{file.summary}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="muted">No deterministic file summaries were generated.</p>
+              )}
+            </section>
+
+            {result.structure.excludedFiles.length > 0 ? (
+              <section className="analysis-panel">
+                <div className="panel-heading">
+                  <h3>Excluded files</h3>
+                  <span>
+                    {number.format(result.structure.excludedFiles.length)} generated, static, dependency, or artifact paths
+                  </span>
+                </div>
+                <div className="important-files-scroll">
+                  <ul className="file-summary-list simple">
+                    {result.structure.excludedFiles.slice(0, 24).map((file) => (
+                      <li key={file.path}>
+                        <strong>{file.path}</strong>
+                        <span>{file.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </section>
+            ) : null}
 
             <section className="analysis-panel">
               <div className="panel-heading">

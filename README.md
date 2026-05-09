@@ -43,7 +43,10 @@ Next: Phase 2 can add AI-backed summaries behind the existing token-aware analys
 - Upgrade messaging with `getUpgradeMessage`
 - Deterministic repo structure analysis:
   - top directories
-  - important project files
+  - excluded generated/static/artifact files
+  - broad relevant file summaries
+  - highlighted project files
+  - lightweight repository structure tree
   - source/test/config/docs counts
 - Token-aware summary budget for future AI passes
 - Suggested improvements generated from tree-level signals
@@ -66,9 +69,23 @@ Excluded directories include:
 - `.next`
 - `coverage`
 
-Common binary/library files are also excluded, including `.jar`, `.class`, `.dll`, `.so`, `.dylib`, `.exe`, images, and PDFs.
+Common binary/library files are also excluded, including `.jar`, `.class`, `.dll`, `.so`, `.dylib`, `.exe`, images, and PDFs. Data and output artifacts such as `.csv`, `.jsonl`, `.parquet`, `.sqlite`, `.db`, and `.log` are excluded from repository understanding.
 
 Source and config files such as `.java`, `.ts`, `.js`, `.py`, `.md`, and `.json` remain scannable unless they are inside an excluded folder.
+
+## Repo Understanding Model
+
+Phase 2C separates file handling into three deterministic layers:
+
+- `excludedFiles`: files that are definitively not useful for source understanding, such as dependencies, build output, binaries, logs, static assets, cache/temp files, and data exports.
+- `relevantFiles`: the broad meaningful repository context, preserving most source/application files plus important config and docs.
+- `highlightedFiles`: a concise ranked subset of `relevantFiles` for onboarding, UI emphasis, and future token-aware AI sampling.
+
+This replaces the older mental model where `importantFiles` had to carry the full architecture in a tiny top-10 or top-12 list. Modern apps often have many meaningful routes, pages, controllers, services, components, and feature modules, so RepoPilot now preserves broad coverage first and ranks highlights second. `importantFiles` remains available as a legacy alias for highlighted file paths.
+
+RepoPilot also generates a lightweight `repositoryTree` from relevant and highlighted files. It is intentionally not a full filesystem dump; it gives a concise architectural overview with highlighted files marked as `[H]`.
+
+After normal ranking, RepoPilot runs a lightweight invisible-domain append pass. If a meaningful domain or persona appears in `relevantFiles` but has no file in `highlightedFiles`, the analyzer can append a minimal representative set for that domain: up to one backend/API file, one frontend/page/UI file, and one strong shared-logic file. This is capped globally at six appended files and improves representation without changing core scoring weights.
 
 ## Compatibility
 
@@ -134,7 +151,7 @@ Free users can only run small scans. Starter users can run small and medium scan
   Central pricing, subscription plan, permission, usage, and upgrade-message logic.
 
 - `app/lib/repo-analysis.ts`  
-  Phase 2 deterministic repo-quality analysis for summaries, structure signals, improvement suggestions, mock PR ideas, and token-aware AI budgeting.
+  Phase 2 deterministic repo-quality analysis for summaries, structure signals, excluded file records, relevant file summaries, highlighted file ranking, repository tree rendering, improvement suggestions, mock PR ideas, and token-aware AI budgeting.
 
 - `app/types.ts`  
   Shared TypeScript types for scan results, errors, tiers, plans, and usage.
@@ -158,14 +175,16 @@ Free users can only run small scans. Starter users can run small and medium scan
 
 1. A user submits a public GitHub repository URL.
 2. The API fetches GitHub metadata, languages, and the recursive tree.
-3. Repo paths are filtered with `shouldScanRepositoryPath`.
-4. Relevant files are counted and used for token estimation.
-5. A one-time scan tier is calculated with `getOneTimeTier`.
-6. Phase 2 analysis generates repo summaries, structure signals, suggested improvements, mock PR ideas, and a token-aware future AI budget.
-7. If a subscription plan and mocked usage are provided, `canRunScan` checks whether the scan is allowed.
-8. If blocked, the API returns an error message.
-9. If allowed, the scan result is returned.
-10. For subscription scans, mocked usage is incremented and `getUpgradeMessage` may return a Free-tier upgrade prompt.
+3. Repo paths are classified with `classifyRepositoryPath`.
+4. `excludedFiles` are recorded for generated, static, dependency, binary, data, log, cache, and build artifacts.
+5. Broad `relevantFiles` are counted and used for token estimation.
+6. A one-time scan tier is calculated with `getOneTimeTier`.
+7. Phase 2 analysis generates repo summaries, structure signals, suggested improvements, mock PR ideas, and a token-aware future AI budget.
+8. Phase 2C file summaries preserve broad `relevantFiles` context while `highlightedFiles` keeps the ranked subset used for focused display and future sampling.
+9. If a subscription plan and mocked usage are provided, `canRunScan` checks whether the scan is allowed.
+10. If blocked, the API returns an error message.
+11. If allowed, the scan result is returned.
+12. For subscription scans, mocked usage is incremented and `getUpgradeMessage` may return a Free-tier upgrade prompt.
 
 ## Test Suite
 
@@ -188,7 +207,10 @@ Current test coverage includes:
 
 - excluded folders such as `.lib`, `node_modules`, `.git`, `build`, and `dist`
 - allowed source/config files such as `.java`, `.ts`, `.js`, `.py`, `.md`, and `.json`
-- binary/library file exclusions
+- binary, static asset, log, and data artifact exclusions
+- broad `relevantFiles` preservation for large and multi-persona repos
+- concise `highlightedFiles` ranking as a subset of relevant files
+- lightweight repository tree generation, highlighted markers, and exclusion behavior
 - one-time scan prices: `$5`, `$12`, `$25`
 - Free plan max usage of 3 scans/month
 - Free plan small-only restriction

@@ -341,6 +341,45 @@ blockquote {
   text-align: right;
 }
 
+.segmented-control {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.segmented-control button {
+  min-height: 34px;
+  border-radius: 0;
+  background: transparent;
+  color: #475569;
+  font-size: 0.82rem;
+  padding: 0 12px;
+}
+
+.segmented-control button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.repo-tree {
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #dbeafe;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  padding: 16px;
+  white-space: pre;
+}
+
 .insight-list,
 .compact-list {
   display: grid;
@@ -354,6 +393,68 @@ blockquote {
 .compact-list {
   overflow-wrap: anywhere;
   font-size: 0.92rem;
+}
+
+.file-summary-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-summary-list li {
+  display: grid;
+  gap: 4px;
+  border-bottom: 1px solid #eef2f7;
+  padding-bottom: 10px;
+}
+
+.file-summary-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.file-summary-list strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.file-summary-list > li > span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.score-pill {
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.representative-pill {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.file-summary-list.simple strong {
+  color: #334155;
 }
 
 .important-files-scroll {

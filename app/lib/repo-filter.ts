@@ -1,5 +1,7 @@
 const EXCLUDED_DIRECTORIES = new Set([
   ".lib",
+  ".idea",
+  ".vscode",
   "node_modules",
   ".git",
   "build",
@@ -11,23 +13,41 @@ const EXCLUDED_DIRECTORIES = new Set([
 ]);
 
 const EXCLUDED_FILES = new Set([
+  ".dockerignore",
+  ".ds_store",
+  ".gitignore",
+  "datasources.xml",
+  "modules.xml",
   "package-lock.json",
+  "thumbs.db",
+  "vcs.xml",
+  "workspace.xml",
   "yarn.lock",
   "pnpm-lock.yaml",
 ]);
 
 const EXCLUDED_EXTENSIONS = new Set([
+  ".iml",
   ".jar",
   ".class",
   ".dll",
   ".so",
   ".dylib",
   ".exe",
+  ".ico",
   ".png",
   ".jpg",
   ".jpeg",
   ".gif",
+  ".svg",
+  ".webp",
   ".pdf",
+  ".csv",
+  ".jsonl",
+  ".parquet",
+  ".sqlite",
+  ".db",
+  ".log",
 ]);
 
 function getExtension(path: string) {
@@ -38,19 +58,42 @@ function getExtension(path: string) {
 }
 
 export function shouldScanRepositoryPath(path: string) {
+  return classifyRepositoryPath(path).shouldScan;
+}
+
+export function classifyRepositoryPath(path: string) {
   const parts = path
     .split(/[\\/]/)
     .filter(Boolean)
     .map((part) => part.toLowerCase());
   const fileName = parts[parts.length - 1] ?? "";
+  const excludedDirectory = parts.find((part) => EXCLUDED_DIRECTORIES.has(part));
 
-  if (parts.some((part) => EXCLUDED_DIRECTORIES.has(part))) {
-    return false;
+  if (excludedDirectory) {
+    return {
+      shouldScan: false,
+      reason: `excluded directory: ${excludedDirectory}`,
+    };
   }
 
   if (EXCLUDED_FILES.has(fileName)) {
-    return false;
+    return {
+      shouldScan: false,
+      reason: `excluded file: ${fileName}`,
+    };
   }
 
-  return !EXCLUDED_EXTENSIONS.has(getExtension(fileName));
+  const extension = getExtension(fileName);
+
+  if (EXCLUDED_EXTENSIONS.has(extension)) {
+    return {
+      shouldScan: false,
+      reason: `excluded extension: ${extension}`,
+    };
+  }
+
+  return {
+    shouldScan: true,
+    reason: null,
+  };
 }

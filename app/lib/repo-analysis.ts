@@ -1,107 +1,45 @@
 import type { OneTimeScanTier, SubscriptionPlan } from "./pricing";
+import { classifyRepositoryPath } from "./repo-filter.ts";
+import { getAnalysisBudget } from "./repo-analysis/budget.ts";
+import { getInvisibleDomainRepresentativePaths } from "./repo-analysis/domain-representatives.ts";
+import { getImprovementLimit, getImprovements } from "./repo-analysis/improvements.ts";
+import { getMockPullRequests } from "./repo-analysis/mock-prs.ts";
+import { getSummary } from "./repo-analysis/summaries.ts";
+import { buildRepositoryStructureTree } from "./repo-analysis/tree.ts";
+import type {
+  AnalysisBudget,
+  FileContentMap,
+  FrameworkDetectionContext,
+  FrameworkDetectionResult,
+  FrameworkDetector,
+  ImportantFileCategory,
+  MockPullRequestIdea,
+  RepoExcludedFile,
+  RepoFileSummary,
+  RepoFileSummaryKind,
+  RepoImprovement,
+  RepoQualityAnalysis,
+  RepositoryFile,
+  RepoStructureAnalysis,
+  RepoStructureSummary,
+  StackSignals,
+} from "./repo-analysis/types.ts";
 
-export type RepositoryFile = {
-  path: string;
-  size?: number;
-};
-
-export type RepoDirectorySignal = {
-  name: string;
-  fileCount: number;
-};
-
-export type RepoStructureAnalysis = {
-  topDirectories: RepoDirectorySignal[];
-  importantFiles: string[];
-  sourceFileCount: number;
-  testFileCount: number;
-  configFileCount: number;
-  documentationFileCount: number;
-};
-
-export type RepoStructureSummary = {
-  totalFiles: number;
-  languages: Record<string, number>;
-  topLevelFolders: string[];
-  importantFiles: string[];
-  likelyEntryPoints: string[];
-  summary: string;
-};
-
-export type RepoImprovement = {
-  title: string;
-  rationale: string;
-  priority: "high" | "medium" | "low";
-};
-
-export type MockPullRequestIdea = {
-  title: string;
-  summary: string;
-  suggestedFiles: string[];
-};
-
-export type AnalysisBudget = {
-  sampledFileCount: number;
-  estimatedPromptTokens: number;
-  strategy: string;
-};
-
-export type RepoQualityAnalysis = {
-  summary: string[];
-  structure: RepoStructureAnalysis;
-  improvements: RepoImprovement[];
-  mockPullRequests: MockPullRequestIdea[];
-  analysisBudget: AnalysisBudget;
-};
-
-export type FileContentMap = Record<string, string>;
-
-type ImportantFileCategory =
-  | "backend_api"
-  | "frontend_route"
-  | "frontend_component"
-  | "shared_logic"
-  | "framework_entry"
-  | "config"
-  | "other";
-
-type FrameworkDetectionContext = {
-  paths: string[];
-  lowerPaths: string[];
-  pathSet: Set<string>;
-  extensionCounts: Map<string, number>;
-  fileContents?: FileContentMap;
-  pythonFileCount: number;
-  jsFileCount: number;
-  tsxFileCount: number;
-  javaFileCount: number;
-  cppFileCount: number;
-  sourceFileCount: number;
-  pythonDominant: boolean;
-  jsDominant: boolean;
-};
-
-type FrameworkDetectionResult = {
-  name: string;
-  confidence: number;
-  signals: string[];
-};
-
-type FrameworkDetector = {
-  name: string;
-  languages: string[];
-  detect: (context: FrameworkDetectionContext) => FrameworkDetectionResult | null;
-};
-
-type StackSignals = {
-  python: boolean;
-  streamlit: boolean;
-  node: boolean;
-  express: boolean;
-  java: boolean;
-  spring: boolean;
-  reactNext: boolean;
-};
+export { buildRepositoryStructureTree } from "./repo-analysis/tree.ts";
+export type {
+  AnalysisBudget,
+  FileContentMap,
+  MockPullRequestIdea,
+  RepoExcludedFile,
+  RepoFileSummary,
+  RepoFileSummaryKind,
+  RepoImprovement,
+  RepoQualityAnalysis,
+  RepositoryFile,
+  RepositoryStructureTree,
+  RepoStructureAnalysis,
+  RepoStructureSummary,
+} from "./repo-analysis/types.ts";
 
 const SOURCE_EXTENSIONS = new Set([
   ".c",
@@ -252,9 +190,6 @@ const MEDIUM_IMPORTANCE_PATTERNS = [
   /^dockerfile$/,
   /^docker-compose\./,
 ];
-
-const VISIBLE_TEST_FILE_CAVEAT =
-  "This is based on visible test files only; integration or end-to-end tests may cover multiple source files.";
 
 const MVC_PATH_SEGMENTS = new Set([
   "controllers",
@@ -1637,10 +1572,283 @@ function isConfigFile(path: string) {
   );
 }
 
+function getFileSummaryKind(path: string): RepoFileSummaryKind {
+  const extension = getExtension(path);
+
+  if (STATIC_ASSET_EXTENSIONS.has(extension)) {
+    return "asset";
+  }
+
+  if (isDataArtifactFile(path)) {
+    return "data";
+  }
+
+  if (isTestFile(path)) {
+    return "test";
+  }
+
+  if (isDocumentationFile(path)) {
+    return "documentation";
+  }
+
+  if (isConfigFile(path)) {
+    return "config";
+  }
+
+  if (SOURCE_EXTENSIONS.has(extension)) {
+    return "source";
+  }
+
+  return "other";
+}
+
+function getFileSummaryReasons(path: string, category: ImportantFileCategory) {
+  const normalized = normalizePath(path).toLowerCase();
+  const reasons: string[] = [];
+
+  if (isKnownRuntimeEntry(normalized)) {
+    reasons.push("runtime entry point");
+  }
+
+  if (category === "backend_api") {
+    reasons.push("backend or API path");
+  }
+
+  if (category === "frontend_route") {
+    reasons.push("frontend route");
+  }
+
+  if (category === "frontend_component") {
+    reasons.push("frontend component");
+  }
+
+  if (category === "shared_logic") {
+    reasons.push("shared application logic");
+  }
+
+  if (hasMvcSignal(normalized)) {
+    reasons.push("MVC/service layer signal");
+  }
+
+  if (getApplicationDomain(normalized)) {
+    reasons.push("domain-oriented path");
+  }
+
+  if (isTestFile(normalized)) {
+    reasons.push("test coverage signal");
+  }
+
+  if (isDocumentationFile(normalized)) {
+    reasons.push("documentation context");
+  }
+
+  if (isConfigFile(normalized)) {
+    reasons.push("project configuration");
+  }
+
+  if (reasons.length === 0 && SOURCE_EXTENSIONS.has(getExtension(normalized))) {
+    reasons.push("source file");
+  }
+
+  return [...new Set(reasons)].slice(0, 4);
+}
+
+function getFileSummaryText({
+  path,
+  kind,
+  category,
+  language,
+  domain,
+  reasons,
+}: {
+  path: string;
+  kind: RepoFileSummaryKind;
+  category: ImportantFileCategory;
+  language?: string;
+  domain: string | null;
+  reasons: string[];
+}) {
+  const fileName = path.split("/").pop() ?? path;
+  const languagePrefix = language ? `${language} ` : "";
+
+  if (kind === "test") {
+    return `${fileName} contributes visible automated test coverage.`;
+  }
+
+  if (kind === "documentation") {
+    return `${fileName} provides documentation context for onboarding or future summaries.`;
+  }
+
+  if (kind === "config") {
+    return `${fileName} provides project configuration or dependency context.`;
+  }
+
+  if (category === "framework_entry") {
+    return `${fileName} looks like a ${languagePrefix}runtime entry point for the project.`;
+  }
+
+  if (category === "backend_api") {
+    return `${fileName} appears to handle backend, API, routing, or controller behavior${
+      domain ? ` for the ${domain} domain` : ""
+    }.`;
+  }
+
+  if (category === "frontend_route") {
+    return `${fileName} appears to define a frontend route${
+      domain ? ` for the ${domain} area` : ""
+    }.`;
+  }
+
+  if (category === "frontend_component") {
+    return `${fileName} appears to define reusable frontend UI behavior${
+      domain ? ` for the ${domain} area` : ""
+    }.`;
+  }
+
+  if (category === "shared_logic") {
+    return `${fileName} appears to contain shared application logic${
+      domain ? ` for the ${domain} domain` : ""
+    }.`;
+  }
+
+  if (reasons.length > 0) {
+    return `${fileName} is relevant because it has ${reasons.join(", ")}.`;
+  }
+
+  return `${fileName} is part of the filtered repository context.`;
+}
+
+function createExcludedFileRecords(files: RepositoryFile[]) {
+  return files
+    .map((file): RepoExcludedFile | null => {
+      const path = normalizePath(file.path);
+      const classification = classifyRepositoryPath(path);
+
+      if (classification.shouldScan) {
+        return null;
+      }
+
+      return {
+        path,
+        size: file.size,
+        reason: classification.reason ?? "excluded by repository filter",
+      };
+    })
+    .filter((file): file is RepoExcludedFile => Boolean(file))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function isRelevantRepositoryFile(file: RepositoryFile) {
+  const path = normalizePath(file.path);
+  const classification = classifyRepositoryPath(path);
+
+  if (!classification.shouldScan) {
+    return false;
+  }
+
+  const kind = getFileSummaryKind(path);
+
+  return kind !== "asset" && kind !== "data";
+}
+
+function createFileSummaries(
+  files: RepositoryFile[],
+  highlightedPaths: string[],
+  domainRepresentativePaths = new Set<string>(),
+): RepoFileSummary[] {
+  const relevantInputFiles = files.filter(isRelevantRepositoryFile);
+  const stackSignals = getStackSignals(relevantInputFiles.map((file) => file.path));
+  const highlightedPathSet = new Set(highlightedPaths.map(normalizePath));
+  const representativePathSet = new Set([...domainRepresentativePaths].map(normalizePath));
+
+  return relevantInputFiles
+    .map((file) => {
+      const path = normalizePath(file.path);
+      const category = getImportantFileCategory(path);
+      const kind = getFileSummaryKind(path);
+      const language = EXTENSION_LANGUAGE_MAP[getExtension(path)];
+      const domain = getApplicationDomain(path);
+      const importanceScore = getFileImportanceScore(path, stackSignals);
+      const reasons = getFileSummaryReasons(path, category);
+      const highlighted = highlightedPathSet.has(path);
+      const highlightReason: RepoFileSummary["highlightReason"] = highlighted
+        ? representativePathSet.has(path)
+          ? "domain_representative"
+          : "ranked"
+        : undefined;
+
+      return {
+        path,
+        size: file.size,
+        language,
+        kind,
+        category,
+        domain,
+        importanceScore,
+        summary: getFileSummaryText({
+          path,
+          kind,
+          category,
+          language,
+          domain,
+          reasons,
+        }),
+        reasons,
+        highlighted,
+        highlightReason,
+      };
+    })
+    .sort(
+      (a, b) =>
+        Number(b.highlighted) - Number(a.highlighted) ||
+        b.importanceScore - a.importanceScore ||
+        a.path.localeCompare(b.path),
+    );
+}
+
+function getHighlightedFileSelection(files: RepositoryFile[]) {
+  const paths = files.filter(isRelevantRepositoryFile).map((file) => normalizePath(file.path));
+  const normalLimit = getImportantFileLimit(paths.length);
+  const rankedHighlightedPaths = selectImportantFiles(paths);
+  const preliminaryRelevantFiles = createFileSummaries(files, rankedHighlightedPaths);
+  const domainRepresentativePaths = new Set(
+    getInvisibleDomainRepresentativePaths({
+      relevantFiles: preliminaryRelevantFiles,
+      highlightedPaths: rankedHighlightedPaths,
+      normalLimit,
+    }),
+  );
+  const highlightedPaths = [
+    ...rankedHighlightedPaths,
+    ...[...domainRepresentativePaths].filter(
+      (path) => !rankedHighlightedPaths.includes(path),
+    ),
+  ];
+
+  return {
+    highlightedPaths,
+    domainRepresentativePaths,
+  };
+}
+
 export function analyzeRepoStructure(files: string[]): RepoStructureSummary {
-  const normalizedFiles = files.map(normalizePath).filter(Boolean);
+  const repositoryFiles = files
+    .map((path) => ({ path: normalizePath(path) }))
+    .filter((file) => Boolean(file.path));
+  const normalizedFiles = repositoryFiles
+    .filter(isRelevantRepositoryFile)
+    .map((file) => file.path);
   const languages: Record<string, number> = {};
   const topLevelFolders = new Set<string>();
+  const {
+    highlightedPaths: importantFiles,
+    domainRepresentativePaths,
+  } = getHighlightedFileSelection(repositoryFiles);
+  const relevantFiles = createFileSummaries(
+    repositoryFiles,
+    importantFiles,
+    domainRepresentativePaths,
+  );
 
   normalizedFiles.forEach((path) => {
     const language = EXTENSION_LANGUAGE_MAP[getExtension(path)];
@@ -1666,7 +1874,14 @@ export function analyzeRepoStructure(files: string[]): RepoStructureSummary {
     totalFiles: normalizedFiles.length,
     languages,
     topLevelFolders: [...topLevelFolders].sort(),
-    importantFiles: selectImportantFiles(normalizedFiles),
+    excludedFiles: createExcludedFileRecords(repositoryFiles),
+    relevantFiles,
+    highlightedFiles: relevantFiles.filter((file) => file.highlighted),
+    repositoryTree: buildRepositoryStructureTree({
+      relevantFiles,
+      highlightedFiles: relevantFiles.filter((file) => file.highlighted),
+    }),
+    importantFiles,
     likelyEntryPoints: sortScoredPaths(normalizedFiles, getEntryPointScore).slice(0, 8),
     summary: `${sizeLabel} ${structureKind} repository with ${normalizedFiles.length} analyzed files${
       mainLanguages.length > 0 ? `, led by ${mainLanguages.join(", ")}` : ""
@@ -1676,13 +1891,23 @@ export function analyzeRepoStructure(files: string[]): RepoStructureSummary {
 
 function getStructureAnalysis(files: RepositoryFile[]): RepoStructureAnalysis {
   const directoryCounts = new Map<string, number>();
-  const paths = files.map((file) => file.path);
+  const analyzableFiles = files.filter(isRelevantRepositoryFile);
+  const {
+    highlightedPaths: importantFiles,
+    domainRepresentativePaths,
+  } = getHighlightedFileSelection(files);
+  const relevantFiles = createFileSummaries(
+    files,
+    importantFiles,
+    domainRepresentativePaths,
+  );
+  const highlightedFiles = relevantFiles.filter((file) => file.highlighted);
   let sourceFileCount = 0;
   let testFileCount = 0;
   let configFileCount = 0;
   let documentationFileCount = 0;
 
-  files.forEach((file) => {
+  analyzableFiles.forEach((file) => {
     const root = getRootDirectory(file.path);
     directoryCounts.set(root, (directoryCounts.get(root) ?? 0) + 1);
 
@@ -1708,393 +1933,18 @@ function getStructureAnalysis(files: RepositoryFile[]): RepoStructureAnalysis {
       .map(([name, fileCount]) => ({ name, fileCount }))
       .sort((a, b) => b.fileCount - a.fileCount || a.name.localeCompare(b.name))
       .slice(0, 6),
-    importantFiles: selectImportantFiles(paths),
+    excludedFiles: createExcludedFileRecords(files),
+    relevantFiles,
+    highlightedFiles,
+    repositoryTree: buildRepositoryStructureTree({
+      relevantFiles,
+      highlightedFiles,
+    }),
+    importantFiles,
     sourceFileCount,
     testFileCount,
     configFileCount,
     documentationFileCount,
-  };
-}
-
-function hasPath(files: RepositoryFile[], predicate: (path: string) => boolean) {
-  return files.some((file) => predicate(file.path.toLowerCase()));
-}
-
-function hasFramework(detectedFrameworks: string[], framework: string) {
-  return detectedFrameworks.includes(framework);
-}
-
-function hasAnyFramework(detectedFrameworks: string[], frameworks: string[]) {
-  return frameworks.some((framework) => detectedFrameworks.includes(framework));
-}
-
-function getSummary(
-  files: RepositoryFile[],
-  detectedLanguages: string[],
-  detectedFrameworks: string[],
-  structure: RepoStructureAnalysis,
-) {
-  const summary: string[] = [];
-  const topDirectoryNames = structure.topDirectories
-    .slice(0, 3)
-    .map((directory) => directory.name)
-    .join(", ");
-  const stack = [...detectedFrameworks, ...detectedLanguages.slice(0, 3)];
-
-  summary.push(
-    topDirectoryNames
-      ? `Structure centers on ${topDirectoryNames}, with ${structure.sourceFileCount} source files selected for analysis.`
-      : "Repository structure is mostly root-level files, so deeper folder organization may be limited.",
-  );
-
-  summary.push(
-    stack.length > 0
-      ? `Primary stack signals: ${stack.join(", ")}.`
-      : "No strong framework signal was detected from the filtered file tree.",
-  );
-
-  summary.push(
-    structure.testFileCount > 0
-      ? `Testing is visible in ${structure.testFileCount} relevant files.`
-      : "No obvious test files were found in the relevant scan set.",
-  );
-
-  if (hasPath(files, (path) => path === "readme.md")) {
-    summary.push("A root README is present, giving the analyzer a documentation anchor.");
-  } else {
-    summary.push("A root README was not found, which may limit onboarding context.");
-  }
-
-  return summary;
-}
-
-function getImprovementLimit(plan?: SubscriptionPlan) {
-  if (!plan) {
-    return 5;
-  }
-
-  if (plan.limits.suggestions === "full") {
-    return 7;
-  }
-
-  if (plan.limits.suggestions === "priority") {
-    return 5;
-  }
-
-  return 3;
-}
-
-function addImprovement(
-  improvements: RepoImprovement[],
-  improvement: RepoImprovement,
-) {
-  if (!improvements.some((item) => item.title === improvement.title)) {
-    improvements.push(improvement);
-  }
-}
-
-function getImprovements(
-  files: RepositoryFile[],
-  structure: RepoStructureAnalysis,
-  totalEstimatedTokens: number,
-  detectedFrameworks: string[],
-) {
-  const improvements: RepoImprovement[] = [];
-  const visibleSourceToTestFileRatio =
-    structure.sourceFileCount / Math.max(structure.testFileCount, 1);
-
-  if (structure.testFileCount === 0 && structure.sourceFileCount > 0) {
-    addImprovement(improvements, {
-      title: "Expand automated test coverage",
-      rationale: `No visible test files were found for the detected source files. ${VISIBLE_TEST_FILE_CAVEAT}`,
-      priority: "high",
-    });
-  } else if (
-    structure.sourceFileCount >= 20 &&
-    visibleSourceToTestFileRatio > 10
-  ) {
-    addImprovement(improvements, {
-      title: "Expand automated test coverage",
-      rationale: `The scan found limited visible test files relative to the amount of source code. ${VISIBLE_TEST_FILE_CAVEAT}`,
-      priority: "medium",
-    });
-  } else if (
-    structure.sourceFileCount >= 20 &&
-    visibleSourceToTestFileRatio > 5
-  ) {
-    addImprovement(improvements, {
-      title: "Review automated test coverage",
-      rationale: `The scan found a modest visible test-file signal relative to the amount of source code. ${VISIBLE_TEST_FILE_CAVEAT}`,
-      priority: "low",
-    });
-  }
-
-  if (!hasPath(files, (path) => path === "readme.md")) {
-    addImprovement(improvements, {
-      title: "Add a root README",
-      rationale: "A concise setup and architecture note improves onboarding and future AI summaries.",
-      priority: "high",
-    });
-  }
-
-  if (!hasPath(files, (path) => path.startsWith(".github/workflows/"))) {
-    addImprovement(improvements, {
-      title: "Add continuous integration checks",
-      rationale: "No GitHub Actions workflow was detected in the relevant tree.",
-      priority: "medium",
-    });
-  }
-
-  if (
-    detectedFrameworks.includes("Next.js") &&
-    !hasPath(files, (path) => path.includes("error.") || path.includes("loading."))
-  ) {
-    addImprovement(improvements, {
-      title: "Review route loading and error states",
-      rationale: "Next.js apps benefit from explicit loading and error boundaries around async routes.",
-      priority: "high",
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "Next.js") &&
-    hasPath(files, (path) => path.includes("/api/")) &&
-    !hasPath(files, (path) => path.includes("/api/") && path.includes("/lib/"))
-  ) {
-    addImprovement(improvements, {
-      title: "Organize Next.js API route logic",
-      rationale: "API route files are present; shared validation and service logic can keep route handlers focused.",
-      priority: "medium",
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "React") &&
-    !hasFramework(detectedFrameworks, "Next.js") &&
-    hasPath(files, (path) => path.includes("/components/")) &&
-    !hasPath(files, (path) => path.includes("/hooks/"))
-  ) {
-    addImprovement(improvements, {
-      title: "Separate React view logic into hooks",
-      rationale: "Component files are visible but hook-level organization is limited in the scanned tree.",
-      priority: "medium",
-    });
-  }
-
-  if (
-    hasAnyFramework(detectedFrameworks, ["Express", "Node.js"]) &&
-    hasPath(files, (path) => path.includes("/routes/")) &&
-    !hasPath(files, (path) => path.includes("/middleware/") || path.includes("errorhandler"))
-  ) {
-    addImprovement(improvements, {
-      title: "Add centralized Node error middleware",
-      rationale: "Route modules are visible, but no obvious middleware layer was found for shared error handling.",
-      priority: "high",
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "Flask") &&
-    !hasPath(files, (path) => path.includes("/blueprints/") || path.includes("blueprint"))
-  ) {
-    addImprovement(improvements, {
-      title: "Introduce Flask blueprint structure",
-      rationale: "Flask apps stay easier to grow when routes are grouped into blueprints with service logic separated.",
-      priority: "medium",
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "Django") &&
-    !hasPath(files, (path) => path.includes("/apps/") || path.includes("/settings/"))
-  ) {
-    addImprovement(improvements, {
-      title: "Review Django app and settings organization",
-      rationale: "Django projects benefit from clear app boundaries and environment-specific settings modules.",
-      priority: "medium",
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "FastAPI") &&
-    !hasPath(files, (path) => path.includes("/routers/") || path.includes("/dependencies"))
-  ) {
-    addImprovement(improvements, {
-      title: "Split FastAPI routers and dependencies",
-      rationale: "FastAPI route files are easier to maintain when routers and dependency providers are organized explicitly.",
-      priority: "medium",
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "Spring Boot") &&
-    structure.sourceFileCount > 0 &&
-    !(
-      hasPath(files, (path) => path.includes("controller")) &&
-      hasPath(files, (path) => path.includes("service")) &&
-      hasPath(files, (path) => path.includes("repository"))
-    )
-  ) {
-    addImprovement(improvements, {
-      title: "Review Spring Boot layering",
-      rationale: "Spring Boot apps are easier to test and evolve with clear controller, service, repository, and configuration boundaries.",
-      priority: "medium",
-    });
-  }
-
-  if (structure.documentationFileCount <= 1 && structure.sourceFileCount > 20) {
-    addImprovement(improvements, {
-      title: "Document key workflows",
-      rationale: "The repository has meaningful source surface but limited documentation files.",
-      priority: "medium",
-    });
-  }
-
-  if (totalEstimatedTokens > 180_000) {
-    addImprovement(improvements, {
-      title: "Split future AI analysis into focused passes",
-      rationale: "The filtered repo is large enough that chunked summaries will control cost and context drift.",
-      priority: "low",
-    });
-  }
-
-  return improvements.sort((a, b) => {
-    const rank = { high: 0, medium: 1, low: 2 };
-
-    return rank[a.priority] - rank[b.priority] || a.title.localeCompare(b.title);
-  });
-}
-
-function getMockPullRequests(
-  files: RepositoryFile[],
-  structure: RepoStructureAnalysis,
-  improvements: RepoImprovement[],
-  detectedFrameworks: string[],
-  plan?: SubscriptionPlan,
-) {
-  if (plan && !plan.limits.mockPrs) {
-    return [];
-  }
-
-  const ideas: MockPullRequestIdea[] = [];
-  const testTarget = files.find((file) => SOURCE_EXTENSIONS.has(getExtension(file.path)));
-  const docsTarget = hasPath(files, (path) => path === "readme.md")
-    ? ["README.md"]
-    : ["README.md", "docs/architecture.md"];
-
-  if (improvements.some((item) => item.title === "Add continuous integration checks")) {
-    ideas.push({
-      title: "Add baseline CI workflow",
-      summary: "Run install, lint, and tests on pull requests before changes merge.",
-      suggestedFiles: [".github/workflows/ci.yml", "package.json"],
-    });
-  }
-
-  if (improvements.some((item) => item.title === "Expand automated test coverage")) {
-    ideas.push({
-      title: "Add focused regression tests",
-      summary: "Cover the highest-value source paths surfaced by the repo scan.",
-      suggestedFiles: testTarget ? [testTarget.path, "tests/"] : ["tests/"],
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "Next.js") &&
-    improvements.some((item) => item.title === "Review route loading and error states")
-  ) {
-    ideas.push({
-      title: "Add loading and error boundaries to async routes",
-      summary: "Introduce route-level loading and error files around the highest-value app routes.",
-      suggestedFiles: ["app/loading.tsx", "app/error.tsx"],
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "React") &&
-    improvements.some((item) => item.title === "Separate React view logic into hooks")
-  ) {
-    ideas.push({
-      title: "Refactor component logic into reusable hooks",
-      summary: "Move repeated state and side-effect logic out of components into focused hook modules.",
-      suggestedFiles: ["src/hooks/", "src/components/"],
-    });
-  }
-
-  if (
-    hasAnyFramework(detectedFrameworks, ["Express", "Node.js"]) &&
-    improvements.some((item) => item.title === "Add centralized Node error middleware")
-  ) {
-    ideas.push({
-      title: "Add shared Express error middleware",
-      summary: "Centralize request error handling and wire it through the route stack.",
-      suggestedFiles: ["src/middleware/errorHandler.ts", "src/routes/"],
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "Flask") &&
-    improvements.some((item) => item.title === "Introduce Flask blueprint structure")
-  ) {
-    ideas.push({
-      title: "Introduce blueprint-based routing structure",
-      summary: "Group Flask routes into blueprints and move reusable business logic into services.",
-      suggestedFiles: ["app/blueprints/", "app/services/"],
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "FastAPI") &&
-    improvements.some((item) => item.title === "Split FastAPI routers and dependencies")
-  ) {
-    ideas.push({
-      title: "Split routers and centralize dependency injection",
-      summary: "Organize FastAPI route modules and dependency providers around feature boundaries.",
-      suggestedFiles: ["app/routers/", "app/dependencies.py"],
-    });
-  }
-
-  if (
-    hasFramework(detectedFrameworks, "Spring Boot") &&
-    improvements.some((item) => item.title === "Review Spring Boot layering")
-  ) {
-    ideas.push({
-      title: "Separate controller service repository layers",
-      summary: "Clarify Spring Boot package boundaries and move business logic out of controllers.",
-      suggestedFiles: ["src/main/java/**/controller/", "src/main/java/**/service/"],
-    });
-  }
-
-  if (structure.documentationFileCount <= 1) {
-    ideas.push({
-      title: "Improve project onboarding docs",
-      summary: "Document local setup, scan boundaries, and the main architecture entry points.",
-      suggestedFiles: docsTarget,
-    });
-  }
-
-  return ideas.slice(0, 3);
-}
-
-function getAnalysisBudget(
-  files: RepositoryFile[],
-  totalEstimatedTokens: number,
-  suggestedTier: OneTimeScanTier,
-): AnalysisBudget {
-  const sampledFileLimit = {
-    small: 12,
-    medium: 24,
-    deep: 40,
-  }[suggestedTier];
-  const promptTokenLimit = {
-    small: 18_000,
-    medium: 36_000,
-    deep: 60_000,
-  }[suggestedTier];
-
-  return {
-    sampledFileCount: Math.min(files.length, sampledFileLimit),
-    estimatedPromptTokens: Math.min(totalEstimatedTokens, promptTokenLimit),
-    strategy: "Use tree-level heuristics first, then sample the most relevant files for any paid AI pass.",
   };
 }
 

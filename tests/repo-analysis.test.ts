@@ -196,6 +196,16 @@ test("detects nested Next.js app roots like Freestyle-Food", () => {
   assert.ok(summary.importantFiles.includes("freestyle-food/app/(freestyle-food)/account/page.tsx"));
   assert.ok(summary.importantFiles.includes("freestyle-food/app/(freestyle-food)/recipes/page.tsx"));
   assert.ok(summary.importantFiles.includes("freestyle-food/app/(freestyle-food)/recipes/RecipeMaker.tsx"));
+  assert.ok(
+    summary.relevantFiles.some(
+      (file) => file.path === "freestyle-food/app/(freestyle-food)/navigation.tsx",
+    ),
+  );
+  assert.ok(
+    summary.excludedFiles.some(
+      (file) => file.path === "freestyle-food/app/favicon.ico",
+    ),
+  );
 });
 
 test("detects Streamlit from nested .streamlit config like local-fresh-deliveries", () => {
@@ -216,6 +226,9 @@ test("detects Streamlit from nested .streamlit config like local-fresh-deliverie
   assert.deepEqual(frameworks, ["Python", "Streamlit"]);
   assert.ok(summary.importantFiles.includes("app/src/Home.py"));
   assert.ok(summary.importantFiles.includes("api/backend_app.py"));
+  assert.ok(
+    summary.relevantFiles.some((file) => file.path === "app/src/pages/40_Customer_Home.py"),
+  );
 });
 
 test("streamlit app prioritizes Python UI entry and page logic over config", () => {
@@ -749,9 +762,534 @@ test("analyzes repo structure and returns token-aware summaries", () => {
   assert.equal(analysis.structure.documentationFileCount, 1);
   assert.ok(analysis.structure.importantFiles.includes("app/page.tsx"));
   assert.ok(analysis.structure.importantFiles.includes("app/api/scan-repo/route.ts"));
+  assert.deepEqual(
+    analysis.structure.highlightedFiles.map((file) => file.path),
+    analysis.structure.importantFiles,
+  );
+  assert.ok(analysis.structure.relevantFiles.length >= analysis.structure.highlightedFiles.length);
+  assert.ok(
+    analysis.structure.relevantFiles.some(
+      (file) =>
+        file.path === "tests/pricing.test.ts" &&
+        file.kind === "test" &&
+        file.summary.includes("test coverage"),
+    ),
+  );
   assert.ok(analysis.summary.some((item) => item.includes("Next.js")));
   assert.equal(analysis.analysisBudget.sampledFileCount, 8);
   assert.equal(analysis.analysisBudget.estimatedPromptTokens, 6400);
+});
+
+test("Phase 2C keeps broad relevant file summaries separate from highlighted files", () => {
+  const files = [
+    { path: "README.md", size: 1000 },
+    { path: "package.json", size: 800 },
+    { path: "app/page.tsx", size: 4000 },
+    { path: "app/api/orders/route.ts", size: 3000 },
+    { path: "app/orders/OrderService.ts", size: 2600 },
+    { path: "tests/orders.test.ts", size: 1600 },
+    { path: "docs/orders.md", size: 1200 },
+    { path: "public/logo.svg", size: 900 },
+    { path: "data/orders.csv", size: 900 },
+  ];
+  const analysis = analyzeRepositoryQuality({
+    files,
+    detectedLanguages: ["TypeScript", "Markdown"],
+    detectedFrameworks: ["Next.js"],
+    totalEstimatedTokens: 6000,
+    suggestedTier: "small",
+  });
+  const relevantPaths = analysis.structure.relevantFiles.map((file) => file.path);
+  const highlightedPaths = analysis.structure.highlightedFiles.map((file) => file.path);
+
+  assert.ok(relevantPaths.includes("tests/orders.test.ts"));
+  assert.ok(relevantPaths.includes("docs/orders.md"));
+  assert.ok(!relevantPaths.includes("public/logo.svg"));
+  assert.ok(!relevantPaths.includes("data/orders.csv"));
+  assert.ok(
+    analysis.structure.excludedFiles.some(
+      (file) => file.path === "public/logo.svg" && file.reason.includes(".svg"),
+    ),
+  );
+  assert.ok(
+    analysis.structure.excludedFiles.some(
+      (file) => file.path === "data/orders.csv" && file.reason.includes(".csv"),
+    ),
+  );
+  assert.ok(highlightedPaths.includes("app/api/orders/route.ts"));
+  assert.ok(highlightedPaths.length < relevantPaths.length);
+  assert.ok(
+    analysis.structure.relevantFiles.every((file) => file.summary.length > 20),
+  );
+});
+
+test("IDE and editor metadata never enter relevant highlighted or tree outputs", () => {
+  const excludedPaths = [
+    ".idea/dataSources.xml",
+    ".idea/modules.xml",
+    ".idea/vcs.xml",
+    ".idea/workspace.xml",
+    ".vscode/settings.json",
+    "RepoPilot.iml",
+    ".gitignore",
+    ".dockerignore",
+    "Thumbs.db",
+    ".DS_Store",
+  ];
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      ...excludedPaths.map((path) => ({ path, size: 500 })),
+      { path: "app/page.tsx", size: 3000 },
+      { path: "app/api/orders/route.ts", size: 3000 },
+      { path: "src/services/OrderService.ts", size: 3000 },
+      { path: "README.md", size: 1000 },
+    ],
+    detectedLanguages: ["TypeScript", "Markdown"],
+    detectedFrameworks: ["Next.js"],
+    totalEstimatedTokens: 6000,
+    suggestedTier: "small",
+  });
+  const relevantPaths = analysis.structure.relevantFiles.map((file) => file.path);
+  const highlightedPaths = analysis.structure.highlightedFiles.map((file) => file.path);
+  const repositoryTree = analysis.structure.repositoryTree.allRelevant;
+
+  excludedPaths.forEach((path) => {
+    assert.ok(!relevantPaths.includes(path), path);
+    assert.ok(!highlightedPaths.includes(path), path);
+    assert.ok(!repositoryTree.includes(path.split("/").pop() ?? path), path);
+  });
+  assert.ok(relevantPaths.includes("app/page.tsx"));
+  assert.ok(highlightedPaths.includes("app/api/orders/route.ts"));
+  assert.ok(repositoryTree.includes("app"));
+  assert.ok(repositoryTree.includes("src"));
+});
+
+test("large repo preserves broad meaningful source coverage in relevant files", () => {
+  const files = [
+    ...Array.from({ length: 30 }, (_, index) => ({
+      path: `app/domain-${index + 1}/page.tsx`,
+      size: 1400,
+    })),
+    ...Array.from({ length: 30 }, (_, index) => ({
+      path: `app/api/domain-${index + 1}/route.ts`,
+      size: 1800,
+    })),
+    ...Array.from({ length: 30 }, (_, index) => ({
+      path: `src/services/Domain${index + 1}Service.ts`,
+      size: 2200,
+    })),
+    ...Array.from({ length: 10 }, (_, index) => ({
+      path: `src/components/Domain${index + 1}Card.tsx`,
+      size: 1200,
+    })),
+    { path: "public/logo.png", size: 900 },
+    { path: "dist/bundle.js", size: 200_000 },
+  ];
+  const analysis = analyzeRepositoryQuality({
+    files,
+    detectedLanguages: ["TypeScript"],
+    detectedFrameworks: ["Next.js", "React"],
+    totalEstimatedTokens: 80_000,
+    suggestedTier: "deep",
+  });
+
+  assert.equal(analysis.structure.relevantFiles.length, 100);
+  assert.ok(analysis.structure.highlightedFiles.length <= 20);
+  assert.ok(analysis.structure.highlightedFiles.length < analysis.structure.relevantFiles.length);
+  assert.ok(
+    analysis.structure.relevantFiles.some((file) => file.path === "app/domain-30/page.tsx"),
+  );
+  assert.ok(
+    analysis.structure.relevantFiles.some(
+      (file) => file.path === "src/services/Domain30Service.ts",
+    ),
+  );
+  assert.ok(!analysis.structure.relevantFiles.some((file) => file.path === "dist/bundle.js"));
+});
+
+test("multi-persona repo preserves broad relevant domain coverage", () => {
+  const domains = ["customer", "store", "analyst", "admin", "driver"];
+  const files = domains.flatMap((domain) => [
+    { path: `api/backend/${domain}/${domain}_routes.py`, size: 1600 },
+    { path: `api/backend/${domain}/${domain}_service.py`, size: 1800 },
+    { path: `app/src/pages/${domain}_dashboard.py`, size: 1500 },
+    { path: `app/src/services/${domain}_client.py`, size: 1300 },
+  ]);
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      ...files,
+      { path: "app/src/assets/logo.png", size: 900 },
+      { path: "api/backend/output/latest_report.json", size: 900 },
+    ],
+    detectedLanguages: ["Python"],
+    detectedFrameworks: ["Python", "Streamlit"],
+    totalEstimatedTokens: 20_000,
+    suggestedTier: "medium",
+  });
+
+  domains.forEach((domain) => {
+    assert.ok(
+      analysis.structure.relevantFiles.some((file) => file.domain === domain),
+      domain,
+    );
+  });
+  assert.ok(
+    analysis.structure.highlightedFiles.some((file) => file.domain === "customer"),
+  );
+  assert.ok(
+    analysis.structure.highlightedFiles.length < analysis.structure.relevantFiles.length,
+  );
+});
+
+test("invisible domain append pass adds representatives for meaningful omitted domains", () => {
+  const domains = [
+    "account",
+    "admin",
+    "analyst",
+    "auth",
+    "buyer",
+    "driver",
+    "store",
+  ];
+  const files = domains.flatMap((domain) => [
+    { path: `api/backend/${domain}/${domain}_routes.py`, size: 1600 },
+    { path: `app/${domain}/page.tsx`, size: 1500 },
+  ]);
+  const analysis = analyzeRepositoryQuality({
+    files,
+    detectedLanguages: ["Python"],
+    detectedFrameworks: ["Python", "Streamlit"],
+    totalEstimatedTokens: 20_000,
+    suggestedTier: "medium",
+  });
+  const representedDomains = new Set(
+    analysis.structure.highlightedFiles.map((file) => file.domain).filter(Boolean),
+  );
+  const representativeFiles = analysis.structure.highlightedFiles.filter(
+    (file) => file.highlightReason === "domain_representative",
+  );
+
+  ["buyer", "store", "analyst", "driver"].forEach((domain) => {
+    assert.ok(representedDomains.has(domain), domain);
+  });
+  assert.ok(representativeFiles.length <= 6);
+  assert.ok(
+    representativeFiles.some((file) => file.path === "api/backend/driver/driver_routes.py"),
+  );
+  assert.ok(
+    representativeFiles.some((file) => file.path === "app/driver/page.tsx"),
+  );
+  assert.ok(analysis.structure.highlightedFiles.length <= 16);
+});
+
+test("invisible domain append pass does not starve later domains before second-layer reps", () => {
+  const domains = [
+    "account",
+    "admin",
+    "analyst",
+    "auth",
+    "buyer",
+    "cart",
+    "catalog",
+    "customer",
+    "dashboard",
+    "driver",
+    "store",
+  ];
+  const files = domains.flatMap((domain) => [
+    { path: `api/backend/${domain}/${domain}_routes.py`, size: 1600 },
+    { path: `app/${domain}/page.tsx`, size: 1500 },
+  ]);
+  const analysis = analyzeRepositoryQuality({
+    files,
+    detectedLanguages: ["TypeScript", "Python"],
+    detectedFrameworks: ["Next.js", "Python"],
+    totalEstimatedTokens: 20_000,
+    suggestedTier: "medium",
+  });
+  const driverRelevantFiles = analysis.structure.relevantFiles.filter(
+    (file) => file.domain === "driver",
+  );
+  const driverHighlightedFiles = analysis.structure.highlightedFiles.filter(
+    (file) => file.domain === "driver",
+  );
+
+  assert.ok(
+    driverRelevantFiles.some((file) => file.path === "api/backend/driver/driver_routes.py"),
+  );
+  assert.ok(driverRelevantFiles.some((file) => file.path === "app/driver/page.tsx"));
+  assert.ok(
+    driverRelevantFiles.some(
+      (file) =>
+        file.category === "backend_api" &&
+        file.kind === "source" &&
+        file.importanceScore >= 6,
+    ),
+  );
+  assert.ok(
+    driverHighlightedFiles.some(
+      (file) =>
+        file.path === "api/backend/driver/driver_routes.py" &&
+        file.highlightReason === "domain_representative",
+    ),
+  );
+});
+
+test("invisible domain append pass includes strong shared logic only when meaningful", () => {
+  const domains = ["account", "admin", "analyst", "auth", "buyer", "cart", "store"];
+  const files = domains.flatMap((domain) => {
+    const capitalizedDomain = domain[0].toUpperCase() + domain.slice(1);
+
+    return [
+      { path: `api/backend/${domain}/${domain}_routes.py`, size: 1600 },
+      { path: `app/${domain}/page.tsx`, size: 1500 },
+      { path: `src/services/${domain}/${capitalizedDomain}Service.ts`, size: 2200 },
+    ];
+  });
+  const analysis = analyzeRepositoryQuality({
+    files,
+    detectedLanguages: ["TypeScript", "Python"],
+    detectedFrameworks: ["Next.js", "Python"],
+    totalEstimatedTokens: 24_000,
+    suggestedTier: "medium",
+  });
+  const buyerRepresentatives = analysis.structure.highlightedFiles.filter(
+    (file) => file.domain === "buyer" && file.highlightReason === "domain_representative",
+  );
+
+  assert.ok(
+    buyerRepresentatives.some((file) => file.path === "api/backend/buyer/buyer_routes.py"),
+  );
+  assert.ok(buyerRepresentatives.some((file) => file.path === "app/buyer/page.tsx"));
+  assert.ok(
+    buyerRepresentatives.some((file) => file.path === "src/services/buyer/BuyerService.ts"),
+  );
+});
+
+test("invisible domain append pass respects the global overflow cap", () => {
+  const domains = [
+    "account",
+    "admin",
+    "analyst",
+    "auth",
+    "buyer",
+    "cart",
+    "catalog",
+    "customer",
+    "dashboard",
+    "driver",
+    "inventory",
+    "payment",
+    "product",
+    "store",
+  ];
+  const files = domains.flatMap((domain) => [
+    { path: `api/backend/${domain}/${domain}_routes.py`, size: 1600 },
+    { path: `app/${domain}/page.tsx`, size: 1500 },
+  ]);
+  const analysis = analyzeRepositoryQuality({
+    files,
+    detectedLanguages: ["TypeScript", "Python"],
+    detectedFrameworks: ["Next.js", "Python"],
+    totalEstimatedTokens: 28_000,
+    suggestedTier: "medium",
+  });
+  const representativeFiles = analysis.structure.highlightedFiles.filter(
+    (file) => file.highlightReason === "domain_representative",
+  );
+
+  assert.ok(representativeFiles.length <= 6);
+  assert.ok(analysis.structure.highlightedFiles.length <= 16);
+});
+
+test("simple repo does not append representative highlights unnecessarily", () => {
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      { path: "README.md", size: 1000 },
+      { path: "app/page.tsx", size: 3000 },
+      { path: "app/api/orders/route.ts", size: 3000 },
+      { path: "app/orders/OrderService.ts", size: 3000 },
+    ],
+    detectedLanguages: ["TypeScript"],
+    detectedFrameworks: ["Next.js"],
+    totalEstimatedTokens: 5000,
+    suggestedTier: "small",
+  });
+
+  assert.ok(
+    analysis.structure.highlightedFiles.every(
+      (file) => file.highlightReason !== "domain_representative",
+    ),
+  );
+  assert.equal(
+    analysis.structure.highlightedFiles.length,
+    analysis.structure.importantFiles.length,
+  );
+});
+
+test("weak trivial domains are not forced into highlighted files", () => {
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      ...Array.from({ length: 12 }, (_, index) => ({
+        path: `app/api/resource-${index + 1}/route.ts`,
+        size: 1800,
+      })),
+      { path: "docs/driver-notes.md", size: 900 },
+      { path: "config/driver.yaml", size: 600 },
+    ],
+    detectedLanguages: ["TypeScript", "Markdown"],
+    detectedFrameworks: ["Next.js"],
+    totalEstimatedTokens: 20_000,
+    suggestedTier: "medium",
+  });
+
+  assert.ok(
+    !analysis.structure.highlightedFiles.some(
+      (file) =>
+        file.highlightReason === "domain_representative" && file.domain === "driver",
+    ),
+  );
+});
+
+test("domain representative append pass preserves ranked high-value highlights", () => {
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      { path: "app/page.tsx", size: 4000 },
+      { path: "app/api/orders/route.ts", size: 3000 },
+      { path: "app/orders/OrderService.ts", size: 3000 },
+      ...["account", "admin", "analyst", "auth", "buyer", "cart", "driver"].map(
+        (domain) => ({
+          path: `api/backend/${domain}/${domain}_routes.py`,
+          size: 1600,
+        }),
+      ),
+    ],
+    detectedLanguages: ["TypeScript", "Python"],
+    detectedFrameworks: ["Next.js", "Python"],
+    totalEstimatedTokens: 20_000,
+    suggestedTier: "medium",
+  });
+  const highlightedPaths = analysis.structure.highlightedFiles.map((file) => file.path);
+
+  assert.ok(highlightedPaths.includes("app/page.tsx"));
+  assert.ok(highlightedPaths.includes("app/api/orders/route.ts"));
+  assert.ok(highlightedPaths.includes("app/orders/OrderService.ts"));
+});
+
+test("PhotoboothApp style repo keeps UI API capture and processing files relevant", () => {
+  const files = [
+    "README.md",
+    "package.json",
+    "next.config.ts",
+    "app/page.tsx",
+    "app/gallery/page.tsx",
+    "app/api/capture/route.ts",
+    "app/api/print/route.ts",
+    "components/CameraBooth.tsx",
+    "components/PhotoStrip.tsx",
+    "lib/camera/captureSession.ts",
+    "lib/print/printQueue.ts",
+    "lib/storage/galleryRepository.ts",
+    "public/sample.jpg",
+    ".next/server/app.js",
+  ].map((path) => ({ path, size: 1000 }));
+  const analysis = analyzeRepositoryQuality({
+    files,
+    detectedLanguages: ["TypeScript"],
+    detectedFrameworks: ["Next.js", "React"],
+    totalEstimatedTokens: 12_000,
+    suggestedTier: "small",
+  });
+  const relevantPaths = analysis.structure.relevantFiles.map((file) => file.path);
+
+  assert.ok(relevantPaths.includes("components/CameraBooth.tsx"));
+  assert.ok(relevantPaths.includes("components/PhotoStrip.tsx"));
+  assert.ok(relevantPaths.includes("lib/camera/captureSession.ts"));
+  assert.ok(relevantPaths.includes("lib/print/printQueue.ts"));
+  assert.ok(relevantPaths.includes("app/api/capture/route.ts"));
+  assert.ok(!relevantPaths.includes("public/sample.jpg"));
+  assert.ok(!relevantPaths.includes(".next/server/app.js"));
+});
+
+test("repository structure tree renders nested folders with indentation", () => {
+  const summary = analyzeRepoStructure([
+    "app/(freestyle-food)/recipes/page.tsx",
+    "app/(freestyle-food)/recipes/RecipeMaker.tsx",
+    "app/(freestyle-food)/account/page.tsx",
+    "app/api/recipes/route.ts",
+    "docs/phase2-summary.md",
+  ]);
+  const tree = summary.repositoryTree.allRelevant;
+
+  assert.ok(tree.includes("app"));
+  assert.ok(tree.includes("└── (freestyle-food)"));
+  assert.ok(tree.includes("    ├── account"));
+  assert.ok(tree.includes("    └── recipes"));
+  assert.ok(tree.includes("docs"));
+  assert.ok(tree.includes("└── [H] phase2-summary.md"));
+});
+
+test("repository structure tree marks highlighted files distinctly", () => {
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      { path: "app/page.tsx", size: 3000 },
+      { path: "app/api/orders/route.ts", size: 3000 },
+      { path: "app/orders/client.ts", size: 2000 },
+      { path: "README.md", size: 1000 },
+    ],
+    detectedLanguages: ["TypeScript"],
+    detectedFrameworks: ["Next.js"],
+    totalEstimatedTokens: 4000,
+    suggestedTier: "small",
+  });
+
+  assert.ok(analysis.structure.repositoryTree.highlightedOnly.includes("[H] page.tsx"));
+  assert.ok(analysis.structure.repositoryTree.highlightedOnly.includes("[H] route.ts"));
+});
+
+test("repository structure tree omits excluded and unrelated artifact branches", () => {
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      { path: "app/page.tsx", size: 3000 },
+      { path: "app/api/orders/route.ts", size: 3000 },
+      { path: "node_modules/react/index.js", size: 1000 },
+      { path: ".next/server/app.js", size: 1000 },
+      { path: "public/logo.png", size: 1000 },
+      { path: "data/orders.csv", size: 1000 },
+    ],
+    detectedLanguages: ["TypeScript"],
+    detectedFrameworks: ["Next.js"],
+    totalEstimatedTokens: 4000,
+    suggestedTier: "small",
+  });
+  const tree = analysis.structure.repositoryTree.allRelevant;
+
+  assert.ok(tree.includes("app"));
+  assert.ok(!tree.includes("node_modules"));
+  assert.ok(!tree.includes(".next"));
+  assert.ok(!tree.includes("public"));
+  assert.ok(!tree.includes("data"));
+});
+
+test("repository structure tree remains concise for large repos", () => {
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      ...Array.from({ length: 120 }, (_, index) => ({
+        path: `app/feature-${index + 1}/page.tsx`,
+        size: 1000,
+      })),
+      { path: "dist/bundle.js", size: 1000 },
+    ],
+    detectedLanguages: ["TypeScript"],
+    detectedFrameworks: ["Next.js"],
+    totalEstimatedTokens: 80_000,
+    suggestedTier: "deep",
+  });
+  const treeLines = analysis.structure.repositoryTree.allRelevant.split("\n");
+
+  assert.ok(treeLines.length < 170);
+  assert.ok(analysis.structure.repositoryTree.highlightedOnly.split("\n").length < treeLines.length);
+  assert.ok(!analysis.structure.repositoryTree.allRelevant.includes("bundle.js"));
 });
 
 test("Next.js repo receives framework-specific suggestions and mock PR ideas", () => {
