@@ -15,6 +15,9 @@ export type RepoStructureAnalysis = {
   excludedFiles: RepoExcludedFile[];
   relevantFiles: RepoFileSummary[];
   highlightedFiles: RepoFileSummary[];
+  fileRelationships: RepoFileRelationship[];
+  architecturalGroups: RepoArchitecturalGroup[];
+  aiContext: RepoAiContextPackage;
   repositoryTree: RepositoryStructureTree;
   importantFiles: string[];
   sourceFileCount: number;
@@ -30,6 +33,9 @@ export type RepoStructureSummary = {
   excludedFiles: RepoExcludedFile[];
   relevantFiles: RepoFileSummary[];
   highlightedFiles: RepoFileSummary[];
+  fileRelationships: RepoFileRelationship[];
+  architecturalGroups: RepoArchitecturalGroup[];
+  aiContext: RepoAiContextPackage;
   repositoryTree: RepositoryStructureTree;
   importantFiles: string[];
   likelyEntryPoints: string[];
@@ -72,16 +78,144 @@ export type ImportantFileCategory =
   | "config"
   | "other";
 
+export type RepoFileRole =
+  | "api_route"
+  | "frontend_page"
+  | "frontend_component"
+  | "shared_logic"
+  | "framework_entry"
+  | "config"
+  | "state_management"
+  | "service"
+  | "model"
+  | "controller"
+  | "repository"
+  | "view"
+  | "test"
+  | "documentation"
+  | "asset"
+  | "data"
+  | "other";
+
+export type RepoFileRelationshipType =
+  | "imports"
+  | "frontend_backend_flow"
+  | "related_state"
+  | "related_service"
+  | "related_model"
+  | "related_controller"
+  | "related_view"
+  | "same_domain"
+  | "same_feature"
+  | "framework_flow";
+
+export type RepoFileRelationshipConfidence = "strong" | "moderate" | "weak";
+
+export type RepoFileRelationship = {
+  sourcePath: string;
+  targetPath: string;
+  type: RepoFileRelationshipType;
+  confidence: RepoFileRelationshipConfidence;
+  reason: string;
+  groupKey?: string;
+  groupLabel?: string;
+};
+
+export type RepoArchitecturalGroupType =
+  | "feature_flow"
+  | "auth_flow"
+  | "frontend_backend_flow"
+  | "mvc_group"
+  | "state_flow"
+  | "api_group"
+  | "persona_workflow";
+
+export type RepoArchitecturalGroup = {
+  id: string;
+  label: string;
+  type: RepoArchitecturalGroupType;
+  summary: string;
+  files: string[];
+  roles: RepoFileRole[];
+  relationshipTypes: RepoFileRelationshipType[];
+  confidence: RepoFileRelationshipConfidence;
+  reasons: string[];
+};
+
+export type RepoContextPriority = "critical" | "high" | "medium" | "low";
+
+export type RepoContextChunkType =
+  | "framework_overview"
+  | "architectural_group"
+  | "highlighted_files"
+  | "relationship_cluster"
+  | "domain_context";
+
+export type RepoContextBudgetStatus = "within_budget" | "near_limit" | "over_budget";
+
+export type RepoContextTokenBudget = {
+  estimatedTokens: number;
+  maxRecommendedTokens: number;
+  budgetStatus: RepoContextBudgetStatus;
+  fileTokenEstimate: number;
+  summaryTokenEstimate: number;
+  relationshipTokenEstimate: number;
+  strategy: string;
+};
+
+export type RepoContextFileRef = {
+  path: string;
+  role: RepoFileRole;
+  category: ImportantFileCategory;
+  domain: string | null;
+  highlighted: boolean;
+  priority: RepoContextPriority;
+  estimatedTokens: number;
+  summary: string;
+  reasons: string[];
+};
+
+export type RepoContextChunk = {
+  id: string;
+  label: string;
+  type: RepoContextChunkType;
+  summary: string;
+  priority: RepoContextPriority;
+  estimatedTokens: number;
+  files: RepoContextFileRef[];
+  relationships: RepoFileRelationship[];
+  architecturalGroupId?: string;
+  reasons: string[];
+};
+
+export type RepoAiContextPackage = {
+  version: "phase3-groundwork-v1";
+  detectedFrameworks: string[];
+  repositorySummary: string;
+  tokenBudget: RepoContextTokenBudget;
+  highlightedFiles: RepoContextFileRef[];
+  architecturalGroups: RepoArchitecturalGroup[];
+  representativeFlows: RepoContextChunk[];
+  chunks: RepoContextChunk[];
+  prioritization: {
+    highPriorityFiles: string[];
+    deferredFiles: string[];
+    reasons: string[];
+  };
+};
+
 export type RepoFileSummary = {
   path: string;
   size?: number;
   language?: string;
   kind: RepoFileSummaryKind;
   category: ImportantFileCategory;
+  role: RepoFileRole;
   domain: string | null;
   importanceScore: number;
   summary: string;
   reasons: string[];
+  relationships: RepoFileRelationship[];
   highlighted: boolean;
   highlightReason?: "ranked" | "domain_representative";
 };
@@ -152,4 +286,5 @@ export type AnalyzeRepositoryQualityInput = {
   totalEstimatedTokens: number;
   suggestedTier: OneTimeScanTier;
   plan?: SubscriptionPlan;
+  fileContents?: FileContentMap;
 };

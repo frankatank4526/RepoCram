@@ -1,253 +1,185 @@
 # RepoPilot
 
-RepoPilot is a Next.js TypeScript app for scanning public GitHub repositories before any paid AI analysis runs. A user can submit a GitHub repository URL, get repo metadata, filter out generated or dependency-heavy files, estimate scan size, receive a one-time scan quote, and review deterministic Phase 2 repo-quality insights.
+RepoPilot is a Next.js TypeScript app for scanning public GitHub repositories before any paid AI analysis runs. It fetches repository metadata and file trees, filters out generated or low-value paths, estimates scan size, applies pricing/subscription rules, and returns deterministic repository-understanding signals.
 
-This repository currently contains Phase 1 functionality plus the first Phase 2 repo-analysis layer. It does not integrate payments, Stripe, authenticated GitHub access, real AI analysis, embeddings, summarization jobs, or actual PR creation yet.
-
-## Status
-This project is currently entering Phase 2:
-- Pricing + subscription system
-- Scan filtering
-- Permission logic
-- Deterministic repo summaries, structure analysis, improvements, and mock PR ideas
-- Test coverage
-
-Next: Phase 2 can add AI-backed summaries behind the existing token-aware analysis budget.
+The current product direction is to make repositories easier to understand, quote, summarize, and eventually analyze with AI. Phase 2 is complete. RepoPilot now has deterministic repository analysis, framework detection, relationship analysis, architectural grouping, and AI-ready metadata/context preparation. It does not yet call LLMs, use embeddings, create real PRs, integrate Stripe, or modify code autonomously.
 
 ## Current Features
 
 - Public GitHub repository scanning through `/api/scan-repo`
-- Repository metadata fetch:
-  - repo name
-  - owner
-  - description
-  - stars
-  - default branch
-  - languages
-  - recursive repository tree
-- Centralized file filtering for scan relevance
-- One-time scan pricing:
-  - small: `$5`
-  - medium: `$12`
-  - deep: `$25`
-- Subscription plan config:
-  - Free
-  - Starter
-  - Pro
-  - Team
-- Free tier limits:
-  - 3 small scans/month
-  - no mock PRs
-  - basic suggestions only
-- Scan permission logic with `canRunScan`
-- Upgrade messaging with `getUpgradeMessage`
-- Deterministic repo structure analysis:
-  - top directories
-  - excluded generated/static/artifact files
-  - broad relevant file summaries
-  - highlighted project files
-  - lightweight repository structure tree
-  - source/test/config/docs counts
-- Token-aware summary budget for future AI passes
-- Suggested improvements generated from tree-level signals
+- Centralized path filtering for dependencies, build output, binary/static/data artifacts, IDE metadata, logs, and cache files
+- One-time scan pricing: small `$5`, medium `$12`, deep `$25`
+- Subscription plan rules for Free, Starter, Pro, and Team
+- Deterministic repository analysis:
+  - language and framework detection
+  - excluded, relevant, and highlighted file records
+  - repository tree generation with `[H]` markers
+  - deterministic file summaries and role classification
+  - relationship analysis between files
+  - architectural grouping and feature/workflow detection
+  - AI-ready metadata chunks for future context windows
+- Repository Understanding preview generated from prioritized architectural context, with provider/fallback status and token/context trace metadata
+- Framework-aware improvement suggestions
 - Mock PR ideas for paid plans and one-time analysis
-- Minimal Node test suite for filtering, pricing, subscription rules, and scan-flow regression checks
+- Correctness-oriented tests for filtering, pricing, analysis, and regression scenarios
 
-## File Filtering
+## Repo Analysis Pipeline
 
-Filtering is centralized in `app/lib/repo-filter.ts`.
+High-level deterministic pipeline:
 
-Excluded directories include:
+1. Path discovery from GitHub recursive tree
+2. Exclusion filtering through `app/lib/repo-filter.ts`
+3. File classification by kind, category, role, language, and domain/persona
+4. Relevance determination for broad source/config/docs/test context
+5. Stack-aware scoring and ranked highlight selection
+6. Invisible-domain representative append pass
+7. Repository tree generation
+8. Relationship analysis from imports, naming, roles, folders, domains, and framework conventions
+9. Architectural grouping into flows/workflows/MVC/state/API groups
+10. AI-ready context preparation with deterministic chunks and token estimates
 
-- `.lib`
-- `node_modules`
-- `.git`
-- `build`
-- `dist`
-- `out`
-- `target`
-- `.next`
-- `coverage`
+## Framework And Stack Support
 
-Common binary/library files are also excluded, including `.jar`, `.class`, `.dll`, `.so`, `.dylib`, `.exe`, images, and PDFs. Data and output artifacts such as `.csv`, `.jsonl`, `.parquet`, `.sqlite`, `.db`, and `.log` are excluded from repository understanding.
+Framework detection is deterministic and heuristic-based. It uses file paths, extensions, config files, dependency manifests, and lightweight import/dependency signals.
 
-Source and config files such as `.java`, `.ts`, `.js`, `.py`, `.md`, and `.json` remain scannable unless they are inside an excluded folder.
+Supported framework/project signals include:
 
-## Repo Understanding Model
-
-Phase 2C separates file handling into three deterministic layers:
-
-- `excludedFiles`: files that are definitively not useful for source understanding, such as dependencies, build output, binaries, logs, static assets, cache/temp files, and data exports.
-- `relevantFiles`: the broad meaningful repository context, preserving most source/application files plus important config and docs.
-- `highlightedFiles`: a concise ranked subset of `relevantFiles` for onboarding, UI emphasis, and future token-aware AI sampling.
-
-This replaces the older mental model where `importantFiles` had to carry the full architecture in a tiny top-10 or top-12 list. Modern apps often have many meaningful routes, pages, controllers, services, components, and feature modules, so RepoPilot now preserves broad coverage first and ranks highlights second. `importantFiles` remains available as a legacy alias for highlighted file paths.
-
-RepoPilot also generates a lightweight `repositoryTree` from relevant and highlighted files. It is intentionally not a full filesystem dump; it gives a concise architectural overview with highlighted files marked as `[H]`.
-
-After normal ranking, RepoPilot runs a lightweight invisible-domain append pass. If a meaningful domain or persona appears in `relevantFiles` but has no file in `highlightedFiles`, the analyzer can append a minimal representative set for that domain: up to one backend/API file, one frontend/page/UI file, and one strong shared-logic file. This is capped globally at six appended files and improves representation without changing core scoring weights.
-
-## Compatibility
-
-RepoPilot currently supports deterministic, heuristic-based analysis for common repository shapes.
-
-Supported languages:
-
-- JavaScript / TypeScript
-- Python
-- Java
-- C / C++ (partial support)
-- Go and Rust project signals (partial support)
-- Markdown, JSON, YAML, TOML, CSS, HTML, and related config/documentation files
-
-Supported frameworks and project signals include:
-
-- Next.js
-- React
+- Next.js and React
 - Express / Node.js
-- Flask
-- Django
-- FastAPI
-- Spring Boot
-- Streamlit
+- Flask, Django, FastAPI, Streamlit, Python
+- Java applications, including Spring Boot, Maven/Gradle projects, Java desktop applications, and MVC-style Java architectures such as Swing or conventional Java MVC patterns
 - Vite
-- Maven / Gradle
 - CMake
-- Docker-based projects
-- Monorepos
+- Docker
+- Monorepo shapes
 
-Detection is based on deterministic heuristics such as file structure, file extensions, config files, and dependency indicators. It is not guaranteed to identify every framework perfectly, and some stacks may only be partially recognized. RepoPilot does not analyze runtime behavior or true code coverage yet.
+Detection is intentionally conservative. RepoPilot does not execute code, inspect runtime behavior, or measure true code coverage.
 
-Future improvements may include broader framework support, improved detection accuracy, and deeper runtime-aware analysis.
+## relevantFiles vs highlightedFiles
 
-## Pricing And Subscription Logic
+Phase 2 moved away from forcing architecture into a tiny `importantFiles` list.
 
-Pricing and subscription behavior are centralized in `app/lib/pricing.ts`.
+- `excludedFiles`: paths removed by deterministic filtering, such as dependencies, binaries, static assets, build output, logs, and data exports.
+- `relevantFiles`: broad meaningful repository context after filtering, including source, tests, docs, config, schema context, and application files.
+- `highlightedFiles`: a concise ranked subset of `relevantFiles` for onboarding, UI emphasis, and future context sampling.
 
-Key helpers:
+`importantFiles` remains as a compatibility alias for highlighted file paths.
 
-- `getOneTimeTier(fileCount, tokens)` returns the one-time scan tier and price.
-- `getSubscriptionPlans()` returns the configured subscription plans.
-- `getSubscriptionPlan(planId)` returns one subscription plan.
-- `canRunScan(plan, usage, requestedTier)` checks whether a scan is allowed.
-- `incrementScanUsage(usage)` returns updated mocked usage after a successful scan.
-- `getUpgradeMessage(plan, usage)` returns upgrade copy for Free users near or at their monthly limit.
-- `getPricingDisplayCopy()` returns user-facing pricing copy for UI display.
+This split exists because modern repositories often contain many meaningful routes, pages, controllers, services, components, feature modules, and persona-specific files. RepoPilot preserves broad context first, then ranks a focused reading list second.
 
-Free users can only run small scans. Starter users can run small and medium scans. Pro and Team users can run deep scans.
+## Deterministic Summaries
 
-## Project Structure
+Each relevant file receives structured deterministic metadata:
 
-- `app/page.tsx`  
-  Main homepage UI with the GitHub URL form, scan results, one-time quote display, upgrade message display, and subscription plan cards.
+- file kind and language
+- architectural category
+- role such as `api_route`, `frontend_page`, `state_management`, `service`, `model`, `controller`, or `framework_entry`
+- domain/persona when detected
+- importance score
+- concise architecture-focused summary
+- deterministic reasons
+- relationships to other files
 
-- `app/api/scan-repo/route.ts`  
-  API route that validates GitHub URLs, calls the GitHub API, filters repository files, estimates tokens, detects languages/frameworks, applies optional subscription checks, and returns scan results.
+Summaries use file names, folders, roles, framework signals, domains, and relationships. They do not use AI or fabricate implementation details.
 
-- `app/lib/repo-filter.ts`  
-  Central helper for deciding whether a repo path should be scanned.
+## Architectural Relationships And Groups
 
-- `app/lib/pricing.ts`  
-  Central pricing, subscription plan, permission, usage, and upgrade-message logic.
+RepoPilot detects lightweight relationships such as:
 
-- `app/lib/repo-analysis.ts`  
-  Phase 2 deterministic repo-quality analysis for summaries, structure signals, excluded file records, relevant file summaries, highlighted file ranking, repository tree rendering, improvement suggestions, mock PR ideas, and token-aware AI budgeting.
+- direct imports
+- frontend/backend flow relationships
+- state/session relationships
+- service/model/controller/view relationships
+- same-domain and same-feature links
+- framework flows such as page-to-API or controller-to-view/model
 
-- `app/types.ts`  
-  Shared TypeScript types for scan results, errors, tiers, plans, and usage.
+Relationships feed architectural groups, including:
 
-- `app/globals.css`  
-  Global styling for the app UI.
+- feature flows, such as `Recipe Flow`
+- auth/session flows, such as `Account Auth Flow`
+- frontend/backend flows
+- MVC groups
+- state flows
+- API groups
+- persona workflows, such as `Driver Workflow` or `Store Management`
 
-- `tests/filtering.test.ts`  
-  Unit tests for path filtering rules.
+These groups help users understand feature boundaries and prepare coherent future AI context windows.
 
-- `tests/pricing.test.ts`  
-  Unit tests for pricing tiers, subscription limits, `canRunScan`, and Free-tier restrictions.
+## AI-Ready Context Preparation
 
-- `tests/scan-flow.test.ts`  
-  Regression test for the high-level scan flow around filtering and one-time quote generation.
+RepoPilot now prepares `structure.aiContext`, a deterministic metadata package for future AI systems. It includes:
 
-- `tests/repo-analysis.test.ts`  
-  Unit tests for Phase 2 structure analysis, token-aware summaries, and mock PR gating.
+- detected frameworks
+- highlighted file references
+- architectural groups
+- representative flow chunks
+- relationship metadata
+- approximate token estimates
+- context prioritization records
 
-## High-Level Scan Flow
+Context chunks are prioritized representative selections, not exhaustive architectural group lists or full source-code payloads yet. They are repo maps and architectural indexes that future AI features can use before selecting raw file contents.
 
-1. A user submits a public GitHub repository URL.
-2. The API fetches GitHub metadata, languages, and the recursive tree.
-3. Repo paths are classified with `classifyRepositoryPath`.
-4. `excludedFiles` are recorded for generated, static, dependency, binary, data, log, cache, and build artifacts.
-5. Broad `relevantFiles` are counted and used for token estimation.
-6. A one-time scan tier is calculated with `getOneTimeTier`.
-7. Phase 2 analysis generates repo summaries, structure signals, suggested improvements, mock PR ideas, and a token-aware future AI budget.
-8. Phase 2C file summaries preserve broad `relevantFiles` context while `highlightedFiles` keeps the ranked subset used for focused display and future sampling.
-9. If a subscription plan and mocked usage are provided, `canRunScan` checks whether the scan is allowed.
-10. If blocked, the API returns an error message.
-11. If allowed, the scan result is returned.
-12. For subscription scans, mocked usage is incremented and `getUpgradeMessage` may return a Free-tier upgrade prompt.
+## AI Provider And Local-Model Readiness
 
-## Test Suite
+Phase 3 AI work is provider-agnostic by design. RepoPilot's AI layer should be able to support hosted APIs, local model servers, self-hosted inference, and custom HTTP endpoints without moving provider-specific assumptions into repository analysis.
 
-Tests live in the `tests/` directory and use Node's built-in test runner.
+Planned provider shapes include:
 
-Run tests with:
+- hosted cloud APIs such as OpenAI, Anthropic, or Gemini
+- local model servers such as Ollama or LM Studio
+- self-hosted OpenAI-compatible servers such as vLLM
+- custom HTTP inference endpoints
+
+Provider metadata can describe deployment type, prompt format, context window, streaming support, estimated latency, and supported capabilities. RepoPilot does not implement local inference yet, but this metadata prepares future routing decisions such as using a local model for cheap summaries and a cloud model for deeper reasoning.
+
+## Testing Philosophy
+
+Testing evolved from helper-level checks toward correctness-oriented integration coverage. The suite still covers pricing, filtering, scan flow, and deterministic helpers, but now also validates architectural usefulness.
+
+Important regression examples:
+
+- invisible-domain regression: driver/persona files in `relevantFiles` must not disappear from `highlightedFiles`
+- `.idea`, `.iml`, and editor metadata exclusion
+- SQL schema files remain relevant but are not highlighted by default
+- config and dependency manifests must not dominate highlighted files
+- frontend/backend representation for multi-domain apps
+- relationship, grouping, and AI-context chunk coherence
+
+Run verification with:
 
 ```bash
 npm test
-```
-
-Other useful checks:
-
-```bash
 npm run lint
 npm run build
 ```
 
-Current test coverage includes:
+## Project Structure
 
-- excluded folders such as `.lib`, `node_modules`, `.git`, `build`, and `dist`
-- allowed source/config files such as `.java`, `.ts`, `.js`, `.py`, `.md`, and `.json`
-- binary, static asset, log, and data artifact exclusions
-- broad `relevantFiles` preservation for large and multi-persona repos
-- concise `highlightedFiles` ranking as a subset of relevant files
-- lightweight repository tree generation, highlighted markers, and exclusion behavior
-- one-time scan prices: `$5`, `$12`, `$25`
-- Free plan max usage of 3 scans/month
-- Free plan small-only restriction
-- Free plan `mockPrs: false`
-- Starter plan deep-scan blocking
-- Pro and Team deep-scan allowance
-- `canRunScan` edge cases for exact monthly limit and one-before-limit usage
-- Phase 2 repo structure analysis
-- Free-plan mock PR idea blocking
-- Paid-plan mock PR idea generation
-- a small scan-flow regression check
+- `app/api/scan-repo/route.ts`: GitHub scan API route and scan result composition
+- `app/lib/repo-filter.ts`: centralized path filtering
+- `app/lib/pricing.ts`: pricing, subscription, permission, and upgrade logic
+- `app/lib/repo-analysis.ts`: public orchestration layer
+- `app/lib/repo-analysis/`: focused deterministic analysis modules
+- `app/page.tsx`: scan UI and result panels
+- `tests/`: Node test suite
+- `docs/phase2-summary.md`: completed Phase 2 architecture handoff
+- `docs/phase3-plan.md`: intended Phase 3 direction
+- `docs/chat-bootstrap.md`: concise future-chat bootstrap context
 
-## Development
+## Future Direction: Phase 3
 
-Install dependencies:
+Phase 3 should build AI-assisted repository intelligence on top of Phase 2 foundations:
 
-```bash
-npm install
-```
+- AI-generated repository summaries
+- AI-assisted mock PR generation
+- contextual code review
+- onboarding explanations
+- scoped analysis using architectural chunks
 
-Start the local app:
+Important constraints remain:
 
-```bash
-npm run dev
-```
-
-Build for production:
-
-```bash
-npm run build
-```
-
-## Current Constraints
-
-- No payment or Stripe integration
-- No paid AI analysis
-- No embeddings or summarization pipeline
-- No actual PR creation
-- No persistent user accounts or database-backed usage tracking
-- GitHub access is public-only and unauthenticated
+- preserve explainability and deterministic preselection
+- avoid giant full-repo prompt dumps
+- keep token budgeting visible
+- keep AI provider integration modular
+- do not introduce autonomous code editing until safety and permissions are designed

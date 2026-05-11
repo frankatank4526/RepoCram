@@ -163,6 +163,18 @@ test("local-fresh-deliveries fixture keeps driver visible and schema files unhig
   const driverHighlightedPaths = analysis.structure.highlightedFiles
     .filter((file) => file.domain === "driver")
     .map((file) => file.path);
+  const streamlitHome = analysis.structure.relevantFiles.find(
+    (file) => file.path === "app/src/Home.py",
+  );
+  const driverRoute = analysis.structure.highlightedFiles.find(
+    (file) => file.path === "api/backend/driver/driver_routes.py",
+  );
+  const driverGroup = analysis.structure.architecturalGroups.find(
+    (group) => group.label === "Driver Workflow",
+  );
+  const driverContextChunk = analysis.structure.aiContext.chunks.find(
+    (chunk) => chunk.label === "Driver Workflow",
+  );
   const configHighlightedCount = analysis.structure.highlightedFiles.filter(
     (file) => file.kind === "config",
   ).length;
@@ -201,6 +213,40 @@ test("local-fresh-deliveries fixture keeps driver visible and schema files unhig
     appendedRepresentativePaths.every((path) => !path.endsWith(".sql")),
     `appended representative paths: ${appendedRepresentativePaths.join(", ")}`,
   );
+  assert.equal(streamlitHome?.role, "framework_entry");
+  assert.match(streamlitHome?.summary ?? "", /main Streamlit entry page/);
+  assert.equal(driverRoute?.role, "api_route");
+  assert.match(driverRoute?.summary ?? "", /route handlers for driver/);
+  assert.match(driverRoute?.summary ?? "", /Connected to 43_Driver_Home\.py/);
+  assert.ok(
+    driverRoute?.relationships.some(
+      (relationship) =>
+        relationship.type === "framework_flow" &&
+        relationship.targetPath === "app/src/pages/43_Driver_Home.py" &&
+        relationship.groupLabel === "Driver Workflow",
+    ),
+  );
+  assert.equal(driverGroup?.type, "persona_workflow");
+  assert.match(driverGroup?.summary ?? "", /driver frontend pages with backend routes/);
+  assert.ok(driverGroup?.files.includes("app/src/pages/43_Driver_Home.py"));
+  assert.equal(driverContextChunk?.type, "architectural_group");
+  assert.equal(driverContextChunk?.priority, "high");
+  assert.ok(
+    driverContextChunk?.files.some(
+      (file) => file.path === "api/backend/driver/driver_routes.py",
+    ),
+  );
+  assert.ok(
+    analysis.structure.aiContext.representativeFlows.some(
+      (chunk) => chunk.label === "Driver Workflow",
+    ),
+  );
+  assert.ok(
+    analysis.structure.aiContext.prioritization.highPriorityFiles.includes(
+      "api/backend/driver/driver_routes.py",
+    ),
+  );
+  assert.ok(analysis.structure.aiContext.tokenBudget.estimatedTokens > 0);
 });
 
 test("domain representative pass ignores highlighted schema artifacts when detecting visibility", () => {

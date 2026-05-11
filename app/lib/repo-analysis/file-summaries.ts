@@ -1,19 +1,26 @@
 import { classifyRepositoryPath } from "../repo-filter.ts";
 import { getApplicationDomain } from "./domains.ts";
+import { getArchitectureFileSummary } from "./file-architecture-summaries.ts";
 import {
   getFileSummaryKind,
   getFileSummaryReasons,
-  getFileSummaryText,
   getImportantFileCategory,
 } from "./file-classification.ts";
+import { getFileRole } from "./file-roles.ts";
 import {
   EXTENSION_LANGUAGE_MAP,
   getExtension,
   getStackSignals,
   normalizePath,
 } from "./path-utils.ts";
+import { getFileRelationships, groupRelationshipsBySource } from "./relationships.ts";
 import { getFileImportanceScore } from "./scoring.ts";
-import type { RepoExcludedFile, RepoFileSummary, RepositoryFile } from "./types.ts";
+import type {
+  FileContentMap,
+  RepoExcludedFile,
+  RepoFileSummary,
+  RepositoryFile,
+} from "./types.ts";
 
 // relevantFiles are intentionally broad. This layer applies the centralized
 // repository filter, removes non-context artifacts, and keeps source/config/docs
@@ -55,13 +62,14 @@ export function createFileSummaries(
   files: RepositoryFile[],
   highlightedPaths: string[],
   domainRepresentativePaths = new Set<string>(),
+  detectedFrameworks: string[] = [],
+  fileContents?: FileContentMap,
 ): RepoFileSummary[] {
   const relevantInputFiles = files.filter(isRelevantRepositoryFile);
   const stackSignals = getStackSignals(relevantInputFiles.map((file) => file.path));
   const highlightedPathSet = new Set(highlightedPaths.map(normalizePath));
   const representativePathSet = new Set([...domainRepresentativePaths].map(normalizePath));
-
-  return relevantInputFiles
+  const summaryInputs = relevantInputFiles
     .map((file) => {
       const path = normalizePath(file.path);
       const category = getImportantFileCategory(path);
@@ -70,6 +78,13 @@ export function createFileSummaries(
       const domain = getApplicationDomain(path);
       const importanceScore = getFileImportanceScore(path, stackSignals);
       const reasons = getFileSummaryReasons(path, category);
+      const role = getFileRole({
+        path,
+        kind,
+        category,
+        detectedFrameworks,
+        stackSignals,
+      });
       const highlighted = highlightedPathSet.has(path);
       const highlightReason: RepoFileSummary["highlightReason"] = highlighted
         ? representativePathSet.has(path)
@@ -83,19 +98,41 @@ export function createFileSummaries(
         language,
         kind,
         category,
+        role,
         domain,
         importanceScore,
-        summary: getFileSummaryText({
-          path,
-          kind,
-          category,
-          language,
-          domain,
-          reasons,
-        }),
+        summary: "",
         reasons,
+        relationships: [],
         highlighted,
         highlightReason,
+      };
+    });
+  const relationships = getFileRelationships({
+    files: summaryInputs,
+    detectedFrameworks,
+    fileContents,
+  });
+  const relationshipsBySource = groupRelationshipsBySource(relationships);
+
+  return summaryInputs
+    .map((file) => {
+      const fileRelationships = relationshipsBySource.get(file.path) ?? [];
+
+      return {
+        ...file,
+        relationships: fileRelationships,
+        summary: getArchitectureFileSummary({
+          path: file.path,
+          kind: file.kind,
+          category: file.category,
+          role: file.role,
+          language: file.language,
+          domain: file.domain,
+          reasons: file.reasons,
+          detectedFrameworks,
+          relationships: fileRelationships,
+        }),
       };
     })
     .sort(

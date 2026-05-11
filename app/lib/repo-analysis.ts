@@ -1,10 +1,13 @@
 import type { OneTimeScanTier, SubscriptionPlan } from "./pricing";
+import { getArchitecturalGroups } from "./repo-analysis/architectural-groups.ts";
 import { getAnalysisBudget } from "./repo-analysis/budget.ts";
+import { prepareAiRepositoryContext } from "./repo-analysis/context-preparation.ts";
 import {
   isConfigFile,
   isDocumentationFile,
   isTestFile,
 } from "./repo-analysis/file-classification.ts";
+import { detectRepositoryFrameworks } from "./repo-analysis/framework-detection.ts";
 import {
   createExcludedFileRecords,
   createFileSummaries,
@@ -44,11 +47,23 @@ import type {
 } from "./repo-analysis/types.ts";
 
 export { buildRepositoryStructureTree } from "./repo-analysis/tree.ts";
-export { detectRepositoryFrameworks } from "./repo-analysis/framework-detection.ts";
+export { detectRepositoryFrameworks };
 export type {
   AnalysisBudget,
   FileContentMap,
   MockPullRequestIdea,
+  RepoAiContextPackage,
+  RepoArchitecturalGroup,
+  RepoArchitecturalGroupType,
+  RepoContextChunk,
+  RepoContextChunkType,
+  RepoContextFileRef,
+  RepoContextPriority,
+  RepoContextTokenBudget,
+  RepoFileRole,
+  RepoFileRelationship,
+  RepoFileRelationshipConfidence,
+  RepoFileRelationshipType,
   RepoExcludedFile,
   RepoFileSummary,
   RepoFileSummaryKind,
@@ -75,11 +90,19 @@ export function analyzeRepoStructure(files: string[]): RepoStructureSummary {
     highlightedPaths: importantFiles,
     domainRepresentativePaths,
   } = getHighlightedFileSelection(repositoryFiles);
+  const detectedFrameworks = detectRepositoryFrameworks(repositoryFiles);
   const relevantFiles = createFileSummaries(
     repositoryFiles,
     importantFiles,
     domainRepresentativePaths,
+    detectedFrameworks,
   );
+  const highlightedFiles = relevantFiles.filter((file) => file.highlighted);
+  const fileRelationships = relevantFiles.flatMap((file) => file.relationships);
+  const architecturalGroups = getArchitecturalGroups({
+    files: relevantFiles,
+    relationships: fileRelationships,
+  });
 
   normalizedFiles.forEach((path) => {
     const language = EXTENSION_LANGUAGE_MAP[getExtension(path)];
@@ -100,6 +123,17 @@ export function analyzeRepoStructure(files: string[]): RepoStructureSummary {
     .map(([language]) => language);
   const structureKind = getStructureKind(normalizedFiles);
   const sizeLabel = getSizeLabel(normalizedFiles.length);
+  const summary = `${sizeLabel} ${structureKind} repository with ${normalizedFiles.length} analyzed files${
+    mainLanguages.length > 0 ? `, led by ${mainLanguages.join(", ")}` : ""
+  }.`;
+  const aiContext = prepareAiRepositoryContext({
+    detectedFrameworks,
+    repositorySummary: summary,
+    relevantFiles,
+    highlightedFiles,
+    relationships: fileRelationships,
+    architecturalGroups,
+  });
 
   return {
     totalFiles: normalizedFiles.length,
@@ -107,20 +141,25 @@ export function analyzeRepoStructure(files: string[]): RepoStructureSummary {
     topLevelFolders: [...topLevelFolders].sort(),
     excludedFiles: createExcludedFileRecords(repositoryFiles),
     relevantFiles,
-    highlightedFiles: relevantFiles.filter((file) => file.highlighted),
+    highlightedFiles,
+    fileRelationships,
+    architecturalGroups,
+    aiContext,
     repositoryTree: buildRepositoryStructureTree({
       relevantFiles,
-      highlightedFiles: relevantFiles.filter((file) => file.highlighted),
+      highlightedFiles,
     }),
     importantFiles,
     likelyEntryPoints: sortScoredPaths(normalizedFiles, getEntryPointScore).slice(0, 8),
-    summary: `${sizeLabel} ${structureKind} repository with ${normalizedFiles.length} analyzed files${
-      mainLanguages.length > 0 ? `, led by ${mainLanguages.join(", ")}` : ""
-    }.`,
+    summary,
   };
 }
 
-function getStructureAnalysis(files: RepositoryFile[]): RepoStructureAnalysis {
+function getStructureAnalysis(
+  files: RepositoryFile[],
+  detectedFrameworks: string[] = [],
+  fileContents?: FileContentMap,
+): RepoStructureAnalysis {
   const directoryCounts = new Map<string, number>();
   const analyzableFiles = files.filter(isRelevantRepositoryFile);
   const {
@@ -131,8 +170,26 @@ function getStructureAnalysis(files: RepositoryFile[]): RepoStructureAnalysis {
     files,
     importantFiles,
     domainRepresentativePaths,
+    detectedFrameworks,
+    fileContents,
   );
   const highlightedFiles = relevantFiles.filter((file) => file.highlighted);
+  const fileRelationships = relevantFiles.flatMap((file) => file.relationships);
+  const architecturalGroups = getArchitecturalGroups({
+    files: relevantFiles,
+    relationships: fileRelationships,
+  });
+  const analyzablePaths = analyzableFiles.map((file) => file.path);
+  const aiContext = prepareAiRepositoryContext({
+    detectedFrameworks,
+    repositorySummary: `${getSizeLabel(analyzablePaths.length)} ${getStructureKind(
+      analyzablePaths,
+    )} repository context prepared from ${analyzablePaths.length} analyzed files.`,
+    relevantFiles,
+    highlightedFiles,
+    relationships: fileRelationships,
+    architecturalGroups,
+  });
   let sourceFileCount = 0;
   let testFileCount = 0;
   let configFileCount = 0;
@@ -167,6 +224,9 @@ function getStructureAnalysis(files: RepositoryFile[]): RepoStructureAnalysis {
     excludedFiles: createExcludedFileRecords(files),
     relevantFiles,
     highlightedFiles,
+    fileRelationships,
+    architecturalGroups,
+    aiContext,
     repositoryTree: buildRepositoryStructureTree({
       relevantFiles,
       highlightedFiles,
@@ -186,6 +246,7 @@ export function analyzeRepositoryQuality({
   totalEstimatedTokens,
   suggestedTier,
   plan,
+  fileContents,
 }: {
   files: RepositoryFile[];
   detectedLanguages: string[];
@@ -193,8 +254,9 @@ export function analyzeRepositoryQuality({
   totalEstimatedTokens: number;
   suggestedTier: OneTimeScanTier;
   plan?: SubscriptionPlan;
+  fileContents?: FileContentMap;
 }): RepoQualityAnalysis {
-  const structure = getStructureAnalysis(files);
+  const structure = getStructureAnalysis(files, detectedFrameworks, fileContents);
   const improvements = getImprovements(
     files,
     structure,

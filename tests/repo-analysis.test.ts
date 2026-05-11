@@ -317,6 +317,106 @@ test("Spring Boot app prioritizes application controller service repository and 
   assert.ok(!summary.importantFiles.includes("target/generated/FoodGenerated.java"));
 });
 
+test("deterministic relationships connect Java MVC controller model and view files", () => {
+  const files = [
+    { path: "README.md", size: 1000 },
+    { path: "pom.xml", size: 900 },
+    { path: "src/main/java/com/example/OrderApplication.java", size: 2200 },
+    { path: "src/main/java/com/example/controllers/OrderController.java", size: 2600 },
+    { path: "src/main/java/com/example/models/Order.java", size: 1800 },
+    { path: "src/main/resources/templates/order.html", size: 1400 },
+  ];
+  const analysis = analyzeRepositoryQuality({
+    files,
+    detectedLanguages: ["Java", "HTML"],
+    detectedFrameworks: ["Spring Boot", "Maven/Gradle"],
+    fileContents: {
+      "src/main/java/com/example/controllers/OrderController.java":
+        "import com.example.models.Order;\nclass OrderController {}",
+    },
+    totalEstimatedTokens: 8000,
+    suggestedTier: "small",
+  });
+  const controller = analysis.structure.relevantFiles.find(
+    (file) => file.path === "src/main/java/com/example/controllers/OrderController.java",
+  );
+  const mvcGroup = analysis.structure.architecturalGroups.find(
+    (group) => group.label === "Order MVC Group",
+  );
+  const mvcContextChunk = analysis.structure.aiContext.chunks.find(
+    (chunk) => chunk.label === "Order MVC Group",
+  );
+
+  assert.equal(controller?.role, "controller");
+  assert.ok(
+    controller?.relationships.some(
+      (relationship) =>
+        relationship.type === "imports" &&
+        relationship.targetPath === "src/main/java/com/example/models/Order.java",
+    ),
+  );
+  assert.ok(
+    controller?.relationships.some(
+      (relationship) =>
+        relationship.type === "framework_flow" &&
+        relationship.targetPath === "src/main/resources/templates/order.html",
+    ),
+  );
+  assert.ok(
+    analysis.structure.fileRelationships.some(
+      (relationship) =>
+        relationship.type === "related_view" ||
+        relationship.type === "framework_flow",
+    ),
+  );
+  assert.equal(mvcGroup?.type, "mvc_group");
+  assert.match(mvcGroup?.summary ?? "", /controller, model, and view layers/);
+  assert.ok(mvcGroup?.files.includes("src/main/resources/templates/order.html"));
+  assert.equal(mvcContextChunk?.type, "architectural_group");
+  assert.equal(mvcContextChunk?.priority, "critical");
+  assert.ok(
+    mvcContextChunk?.relationships.some((relationship) => relationship.type === "imports"),
+  );
+  assert.ok(
+    analysis.structure.aiContext.representativeFlows.some(
+      (chunk) => chunk.label === "Order MVC Group",
+    ),
+  );
+});
+
+test("architectural grouping avoids unrelated same-role files without relationships", () => {
+  const analysis = analyzeRepositoryQuality({
+    files: [
+      { path: "app/orders/page.tsx", size: 1600 },
+      { path: "app/reports/page.tsx", size: 1600 },
+      { path: "components/Header.tsx", size: 1000 },
+      { path: "components/Footer.tsx", size: 1000 },
+      { path: "README.md", size: 800 },
+    ],
+    detectedLanguages: ["TypeScript"],
+    detectedFrameworks: ["Next.js", "React"],
+    totalEstimatedTokens: 5000,
+    suggestedTier: "small",
+  });
+
+  assert.ok(
+    analysis.structure.architecturalGroups.every((group) => group.files.length >= 2),
+  );
+  assert.ok(
+    !analysis.structure.architecturalGroups.some((group) =>
+      group.files.includes("components/Header.tsx") &&
+      group.files.includes("components/Footer.tsx"),
+    ),
+  );
+  assert.ok(
+    !analysis.structure.aiContext.chunks.some((chunk) =>
+      chunk.type === "architectural_group" &&
+      chunk.files.some((file) => file.path === "components/Header.tsx") &&
+      chunk.files.some((file) => file.path === "components/Footer.tsx"),
+    ),
+  );
+});
+
 test("generic repo falls back to source and MVC scoring without framework signals", () => {
   const files = [
     "README.md",

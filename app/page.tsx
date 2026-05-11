@@ -56,6 +56,43 @@ function Tags({ values, emptyLabel }: { values: string[]; emptyLabel: string }) 
   );
 }
 
+function relationshipLabel(type: string) {
+  if (
+    type === "frontend_backend_flow" ||
+    type === "related_api" ||
+    type === "related_frontend"
+  ) {
+    return "frontend/backend flow";
+  }
+
+  return type.replaceAll("_", " ");
+}
+
+function groupTypeLabel(type: string) {
+  return type.replaceAll("_", " ");
+}
+
+function understandingStatusLabel(status: RepoScanResult["repositoryUnderstanding"]["status"]) {
+  return {
+    generated: "AI generated",
+    fallback: "Context fallback",
+    unavailable: "Unavailable",
+  }[status];
+}
+
+function getVisibleRelationships(file: RepoScanResult["structure"]["highlightedFiles"][number]) {
+  const seenTargets = new Set<string>();
+
+  return file.relationships.filter((relationship) => {
+    if (seenTargets.has(relationship.targetPath)) {
+      return false;
+    }
+
+    seenTargets.add(relationship.targetPath);
+    return true;
+  }).slice(0, 3);
+}
+
 export default function Home() {
   const [repoUrl, setRepoUrl] = useState("");
   const [result, setResult] = useState<RepoScanResult | null>(null);
@@ -115,7 +152,7 @@ export default function Home() {
           <h1>Quote a GitHub repo before the deep analysis begins.</h1>
           <p className="lede">
             Paste a public repository URL to fetch metadata, file structure, language signals,
-            and a suggested analysis tier. Paid AI analysis is intentionally not implemented yet.
+            a suggested analysis tier, and a context-grounded repository understanding preview.
           </p>
         </div>
       </section>
@@ -205,6 +242,61 @@ export default function Home() {
               </section>
             </div>
 
+            <section className="analysis-panel repository-understanding">
+              <div className="panel-heading">
+                <h3>Repository Understanding</h3>
+                <span>{understandingStatusLabel(result.repositoryUnderstanding.status)}</span>
+              </div>
+              <p className="panel-note">{result.repositoryUnderstanding.statusMessage}</p>
+              <div className="understanding-copy">
+                {result.repositoryUnderstanding.overview.split("\n\n").map((paragraph) => (
+                  <p key={paragraph}>{paragraph}</p>
+                ))}
+              </div>
+              <div className="understanding-trace">
+                <div>
+                  <span>Generated using</span>
+                  <strong>
+                    {result.repositoryUnderstanding.generatedUsing.chunks
+                      .slice(0, 4)
+                      .map((chunk) => chunk.label)
+                      .join(", ") || "prioritized context"}
+                  </strong>
+                </div>
+                <div>
+                  <span>Provider</span>
+                  <strong>
+                    {result.repositoryUnderstanding.providerId}
+                    {result.repositoryUnderstanding.model
+                      ? ` / ${result.repositoryUnderstanding.model}`
+                      : ""}
+                  </strong>
+                </div>
+                <div>
+                  <span>Prompt estimate</span>
+                  <strong>
+                    {number.format(result.repositoryUnderstanding.trace.estimatedPromptTokens)} tokens
+                  </strong>
+                </div>
+                <div>
+                  <span>Selected chunks</span>
+                  <strong>
+                    {number.format(result.repositoryUnderstanding.trace.selectedChunkCount)}
+                  </strong>
+                </div>
+              </div>
+              {result.repositoryUnderstanding.generatedUsing.chunks.length > 0 ? (
+                <div className="context-chip-list" aria-label="Selected repository understanding context">
+                  {result.repositoryUnderstanding.generatedUsing.chunks.slice(0, 6).map((chunk) => (
+                    <span key={chunk.id}>
+                      {chunk.label}
+                      <small>{chunk.priority}</small>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
             <section className="analysis-panel">
               <div className="panel-heading">
                 <h3>Repo summary</h3>
@@ -269,8 +361,22 @@ export default function Home() {
                           {file.highlightReason === "domain_representative" ? (
                             <span className="representative-pill">representative</span>
                           ) : null}
+                          <span className="role-pill">{file.role.replaceAll("_", " ")}</span>
                         </strong>
                         <span>{file.summary}</span>
+                        {getVisibleRelationships(file).length > 0 ? (
+                          <div className="related-files">
+                            <span>Related</span>
+                            <div>
+                              {getVisibleRelationships(file).map((relationship) => (
+                                <span key={`${relationship.type}:${relationship.targetPath}`}>
+                                  {relationship.targetPath.split("/").pop() ?? relationship.targetPath}
+                                  <small>{relationshipLabel(relationship.type)}</small>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
@@ -278,6 +384,74 @@ export default function Home() {
               ) : (
                 <p className="muted">No common project anchor files were found.</p>
               )}
+            </section>
+
+            {result.structure.architecturalGroups.length > 0 ? (
+              <section className="analysis-panel">
+                <div className="panel-heading">
+                  <h3>Architectural groups</h3>
+                  <span>
+                    {number.format(result.structure.architecturalGroups.length)} deterministic flows
+                  </span>
+                </div>
+                <div className="architectural-group-list">
+                  {result.structure.architecturalGroups.map((group) => (
+                    <article key={group.id}>
+                      <div>
+                        <h4>{group.label}</h4>
+                        <span>{groupTypeLabel(group.type)}</span>
+                      </div>
+                      <p>{group.summary}</p>
+                      <ul>
+                        {group.files.slice(0, 5).map((path) => (
+                          <li key={path}>{path}</li>
+                        ))}
+                      </ul>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <section className="analysis-panel">
+              <div className="panel-heading">
+                <h3>Prioritized AI context</h3>
+                <span>
+                  {number.format(result.structure.aiContext.tokenBudget.estimatedTokens)} planned tokens
+                </span>
+              </div>
+              <div className="context-plan-summary">
+                <div>
+                  <span>Budget</span>
+                  <strong>{result.structure.aiContext.tokenBudget.budgetStatus.replaceAll("_", " ")}</strong>
+                </div>
+                <div>
+                  <span>Chunks</span>
+                  <strong>{number.format(result.structure.aiContext.chunks.length)}</strong>
+                </div>
+                <div>
+                  <span>Representative flows</span>
+                  <strong>{number.format(result.structure.aiContext.representativeFlows.length)}</strong>
+                </div>
+              </div>
+              <p className="panel-note">
+                Selected representative chunks for future AI prompts, not an exhaustive list of every
+                architectural group detected.
+              </p>
+              <div className="context-chunk-list">
+                {result.structure.aiContext.chunks.slice(0, 4).map((chunk) => (
+                  <article key={chunk.id}>
+                    <div>
+                      <h4>{chunk.label}</h4>
+                      <span>{chunk.priority}</span>
+                    </div>
+                    <p>{chunk.summary}</p>
+                    <small>
+                      {number.format(chunk.files.length)} files · {number.format(chunk.estimatedTokens)} tokens
+                    </small>
+                  </article>
+                ))}
+              </div>
             </section>
 
             <section className="analysis-panel">
@@ -319,7 +493,10 @@ export default function Home() {
                   <ul className="file-summary-list">
                     {result.structure.relevantFiles.slice(0, 24).map((file) => (
                       <li key={file.path}>
-                        <strong>{file.path}</strong>
+                        <strong>
+                          {file.path}
+                          <span className="role-pill">{file.role.replaceAll("_", " ")}</span>
+                        </strong>
                         <span>{file.summary}</span>
                       </li>
                     ))}

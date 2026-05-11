@@ -1,4 +1,7 @@
 import type {
+  AiRepositoryUnderstanding,
+} from "./lib/ai-analysis";
+import type {
   AnalysisBudget,
   RepoExcludedFile,
   RepoFileSummary,
@@ -22,6 +25,7 @@ export type SubscriptionPlan = PricingSubscriptionPlan;
 export type SubscriptionPlanId = PricingSubscriptionPlanId;
 export type SubscriptionUsage = PricingSubscriptionUsage;
 export type {
+  AiRepositoryUnderstanding,
   AnalysisBudget,
   RepoExcludedFile,
   RepoFileSummary,
@@ -50,6 +54,7 @@ export type RepoScanResult = {
   improvements: RepoImprovement[];
   mockPullRequests: MockPullRequestIdea[];
   analysisBudget: AnalysisBudget;
+  repositoryUnderstanding: AiRepositoryUnderstanding;
   usage?: SubscriptionUsage;
   upgradeMessage?: string | null;
 };

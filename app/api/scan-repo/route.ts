@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createRepositoryUnderstanding } from "../../lib/ai-analysis";
 import {
   canRunScan,
   getOneTimeTier,
@@ -243,6 +244,9 @@ export async function POST(request: NextRequest) {
       suggestedTier: tier.suggestedTier,
       plan: subscriptionPlan,
     });
+    const repositoryUnderstanding = await createRepositoryUnderstanding({
+      aiContext: qualityAnalysis.structure.aiContext,
+    });
     let updatedUsage: SubscriptionUsage | undefined;
     let upgradeMessage: string | null | undefined;
 
@@ -279,6 +283,7 @@ export async function POST(request: NextRequest) {
       detectedFrameworks,
       ...tier,
       ...qualityAnalysis,
+      repositoryUnderstanding,
       usage: updatedUsage,
       upgradeMessage,
     };
