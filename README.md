@@ -132,6 +132,29 @@ Planned provider shapes include:
 
 Provider metadata can describe deployment type, prompt format, context window, streaming support, estimated latency, and supported capabilities. RepoPilot does not implement local inference yet, but this metadata prepares future routing decisions such as using a local model for cheap summaries and a cloud model for deeper reasoning.
 
+## AI Provider Configuration
+
+Copy `.env.example` to `.env.local` for local development and fill in only the provider values you want to use. Never commit `.env`, `.env.local`, or real API keys.
+
+Current hosted provider configuration:
+
+```bash
+AI_PROVIDER="openai"
+OPENAI_API_KEY="your-api-key"
+OPENAI_MODEL="gpt-4.1-mini"
+OPENAI_BASE_URL=""
+```
+
+Future local-provider placeholders are also documented:
+
+```bash
+AI_PROVIDER="ollama"
+OLLAMA_BASE_URL="http://localhost:11434"
+OLLAMA_MODEL="your-local-model"
+```
+
+Provider configuration is centralized in the AI analysis layer. Missing or invalid provider configuration does not crash scans; RepoPilot falls back to the deterministic repository understanding overview. In production, set secrets through your deployment provider's environment dashboard rather than committing files.
+
 ## Testing Philosophy
 
 Testing evolved from helper-level checks toward correctness-oriented integration coverage. The suite still covers pricing, filtering, scan flow, and deterministic helpers, but now also validates architectural usefulness.

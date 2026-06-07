@@ -1,5 +1,12 @@
 export { assembleAiRepositoryContext } from "./ai-analysis/context-assembly.ts";
 export {
+  createAIProviderFromConfig,
+  getAIProviderConfig,
+  getAIProviderDebugStatus,
+  getProviderMetadataFromConfig,
+  validateProviderConfig,
+} from "./ai-analysis/provider-config.ts";
+export {
   getAiProviderRouteCandidates,
   getPromptTokenLimitForCandidate,
   selectAiProviderCandidate,
@@ -29,6 +36,13 @@ export type {
   AiRepositoryUnderstandingStatus,
   AssembledAiRepositoryContext,
 } from "./ai-analysis/types.ts";
+export type {
+  AIProviderConfig,
+  AIProviderEnv,
+  AIProviderName,
+  OllamaProviderConfig,
+  OpenAIProviderConfig,
+} from "./ai-analysis/provider-config.ts";
 export type {
   AiProviderRouteCandidate,
   AiProviderRoutingPreference,
